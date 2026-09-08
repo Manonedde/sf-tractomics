@@ -1,0 +1,2 @@
+segmentation/lstai:
+  - "modules/local/segmentation/lstai/**"

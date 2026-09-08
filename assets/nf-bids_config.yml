@@ -52,3 +52,31 @@ sbref_full:
         direction: dir-PA
       ap:
         direction: dir-AP
+
+lesion_mask:
+  suffix_maps_to: "mask"
+  sequential_set:
+    by_entity: "run"
+    derivatives: true
+    filename_pattern: "(?i).*(desc-annotated|desc-lesion).*\\.nii\\.gz$"
+  also_try: ["lesion_mask_unreviewed", "lesion_candidate_unit1", "lesion_candidate_flair"]
+  not_found_message: "White matter lesions were not generated."
+
+lesion_mask_unreviewed:
+  suffix_maps_to: "mask"
+  sequential_set:
+    by_entity: "run"
+    derivatives: true
+    filename_pattern: "(?i)(?!.*desc-annotated)(?!.*desc-lesion).*\\.nii\\.gz$"
+
+lesion_candidate_unit1:
+  suffix_maps_to: "UNIT1"
+  sequential_set:
+    by_entity: "run"
+    derivatives: false
+
+lesion_candidate_flair:
+  suffix_maps_to: "FLAIR"
+  sequential_set:
+    by_entity: "run"
+    derivatives: false

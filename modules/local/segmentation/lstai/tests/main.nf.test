@@ -1,0 +1,40 @@
+nextflow_process {
+
+    name "Test Process SEGMENTATION_LSTAI"
+    script "../main.nf"
+    process "SEGMENTATION_LSTAI"
+    config "./nextflow.config"
+
+    tag "modules"
+    tag "modules_local"
+    tag "segmentation"
+    tag "segmentation/lstai"
+
+    // No T1w/FLAIR MS-lesion test fixture is currently published for this pipeline
+    // (unlike vendored nf-neuro modules, LOAD_TEST_DATA is not usable here: it needs
+    // params.test_data_associations, which sf-tractomics never sets). This stub-run
+    // test only exercises argument wiring and output declarations; it never reads
+    // file contents, so any two existing files stand in for the T1w/FLAIR inputs.
+    test("segmentation - lstai - stub-run") {
+        tag "stub"
+        options "-stub-run"
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test', single_end:false ], // meta map
+                    file("\${projectDir}/assets/schema_input.json", checkIfExists: true),
+                    file("\${projectDir}/assets/nf-bids_config.yml", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+}

@@ -1,0 +1,14 @@
+{
+    "segmentation - lstai - stub-run": {
+        "content": [
+            [
+                "versions.yml:md5,87b33423229868e02b051435945b8838"
+            ]
+        ],
+        "timestamp": "2026-09-08T12:28:13.236179969",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.10.6"
+        }
+    }
+}
