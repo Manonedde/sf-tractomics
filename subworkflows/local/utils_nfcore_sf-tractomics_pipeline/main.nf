@@ -199,7 +199,6 @@ workflow PIPELINE_INITIALISATION {
 
                 // T1w
                 // ** Note: we don't need the JSON files for T1w ** //
-                def t1w_all = normalizeToList(item.T1w?.nii ?: [])
                 def t1w = item.T1w?.nii ?: []
 
                 if ( t1w && t1w.size() > 1 ) {
@@ -210,31 +209,26 @@ workflow PIPELINE_INITIALISATION {
                     t1w = t1w[0]
                 }
 
-                // Lesion mask: prefer a human-reviewed precomputed lesion mask found under
-                // the BIDS derivatives/ tree, then its unreviewed counterpart, then fall
-                // back to a raw UNIDEN/MP2RAGE T1w reconstruction (a distinct acquisition
-                // from the plain T1w used above, filtered out of the T1w list already
-                // collected), then UNIT1/FLAIR. See assets/nf-bids_config.yml (lesion_mask,
-                // lesion_mask_unreviewed, lesion_candidate_unit1/flair) for the matching
-                // rules; nf-bids itself logs a note when none of them are found.
-                // Note: lesion_candidate_t1w is deliberately NOT a separate nf-bids config
-                // entry, since it would need suffix_maps_to: "T1w" under the same
-                // sequential_set type as the real T1w entry above, which would make nf-bids
-                // resolve every T1w file to it instead of to T1w (see BaseSetHandler /
-                // SuffixMapper: only one set of config keys "owns" a given suffix per set
-                // type). Filtering the already-collected T1w list here avoids that collision.
-                def t1w_uniden_mp2rage = t1w_all.findAll { path -> path.toString() =~ /(?i)(uniden|mp2rage)/ }
-                def lesion = item.lesion_mask?.nii ?:
-                    item.lesion_mask_unreviewed?.nii ?:
-                    t1w_uniden_mp2rage ?:
-                    item.lesion_candidate_unit1?.nii ?:
-                    item.lesion_candidate_flair?.nii ?: []
-                if ( lesion instanceof List && lesion.size() > 1 ) {
-                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple lesion mask/candidate files found. Using the last one for processing."
-                    lesion = lesion[-1]
+                // Lesion mask: a precomputed lesion mask found under the
+                // BIDS derivatives/ tree
+                def lesion_mask = item.lesion_mask?.nii ?: item.lesion_mask_unreviewed?.nii ?: []
+                if ( lesion_mask instanceof List && lesion_mask.size() > 1 ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple derivatives lesion masks found. Using the last one for processing."
+                    lesion_mask = lesion_mask[-1]
                 }
-                else if ( lesion instanceof List ) {
-                    lesion = lesion ? lesion[0] : []
+                else if ( lesion_mask instanceof List ) {
+                    lesion_mask = lesion_mask ? lesion_mask[0] : []
+                }
+
+                // Raw FLAIR acquisition, used as SEGMENTATION_LSTAI input (together with
+                // the T1w already selected above) when no precomputed lesion mask exists.
+                def flair = item.lesion_candidate_flair?.nii ?: []
+                if ( flair instanceof List && flair.size() > 1 ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple FLAIR images found. Using the last one for LST-AI lesion segmentation."
+                    flair = flair[-1]
+                }
+                else if ( flair instanceof List ) {
+                    flair = flair ? flair[0] : []
                 }
 
                 // Get Freesurfer parcellations if exists
@@ -375,7 +369,8 @@ workflow PIPELINE_INITIALISATION {
                             (rev_idx != null) ? [reverse_nii[rev_idx], reverse_bval[rev_idx], reverse_bvec[rev_idx]] : [],
                             sbref_split?.same?.find()?.nii ?: epi_split?.same?.find()?.nii ?: [],
                             sbref_split?.opposite?.find()?.nii ?: epi_split?.opposite?.find()?.nii ?: [],
-                            lesion
+                            lesion_mask,
+                            flair
                         ]
                     }
                 }
@@ -478,7 +473,8 @@ workflow PIPELINE_INITIALISATION {
                             [],
                             sbref_split?.same?.find()?.nii ?: epi_split?.same?.find()?.nii ?: [],
                             sbref_split?.opposite?.find()?.nii ?: epi_split?.opposite?.find()?.nii ?: [],
-                            lesion
+                            lesion_mask,
+                            flair
                         ]
                     }
                 }
@@ -520,6 +516,10 @@ workflow PIPELINE_INITIALISATION {
         else {
             // samplesheet
             log.info "Input ${input} is a samplesheet. Using nf-schema plugin to parse the samplesheet."
+            // Note: the samplesheet schema has no FLAIR column, so a "flair" placeholder
+            // of [] is emitted to keep this tuple's shape aligned with the BIDS-directory
+            // branch above. This means SEGMENTATION_LSTAI never triggers for samplesheet
+            // input; a lesion mask can only come from the samplesheet's own "lesion" column.
             ch_inputs = channel
                 .fromList(samplesheetToList(input, "${projectDir}/assets/schema_input.json"))
                 .map{
@@ -533,7 +533,8 @@ workflow PIPELINE_INITIALISATION {
                             rev_dwi ? [rev_dwi, rev_bval, rev_bvec] : [],
                             sbref ?: [],
                             rev_sbref ?: [],
-                            lesion ?: []
+                            lesion ?: [],
+                            []
                         ]
                 }
         }
