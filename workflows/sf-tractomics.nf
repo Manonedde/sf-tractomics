@@ -10,6 +10,7 @@ include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pi
 include { softwareVersionsToYAML } from '../subworkflows/nf-core/utils_nfcore_pipeline'
 include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_sf-tractomics_pipeline'
 include { TRACTOFLOW             } from '../subworkflows/nf-neuro/tractoflow'
+include { SEGMENTATION_LSTAI     } from '../modules/local/segmentation/lstai/main'
 include { TRACTOGRAM_MATH as ENSEMBLE_TRACKING } from '../modules/nf-neuro/tractogram/math/main'
 include { QC_TRACTOGRAM as QC_ENSEMBLE } from '../modules/nf-neuro/qc/tractogram/main'
 include { ATLAS_IIT              } from '../subworkflows/nf-neuro/atlas_iit/main'
@@ -37,7 +38,7 @@ workflow SF_TRACTOMICS {
     main:
 
     ch_inputs = ch_inputs
-        .multiMap{ meta, t1, wmparc, aparcaseg, dwi_bval_bvec, rev_dwi_bval_bvec, b0, rev_b0, lesion ->
+        .multiMap{ meta, t1, wmparc, aparcaseg, dwi_bval_bvec, rev_dwi_bval_bvec, b0, rev_b0, lesion_mask, flair ->
             meta: meta
             t1: [meta, t1]
             wmparc: [meta, wmparc]
@@ -46,7 +47,8 @@ workflow SF_TRACTOMICS {
             rev_dwi_bval_bvec: [meta, rev_dwi_bval_bvec[0], rev_dwi_bval_bvec[1], rev_dwi_bval_bvec[2]]
             b0: [meta, b0]
             rev_b0: [meta, rev_b0]
-            lesion: [meta, lesion]
+            lesion_mask: [meta, lesion_mask]
+            flair: [meta, flair]
         }
 
     if ( params.harmonization_reference ) {
@@ -95,6 +97,28 @@ workflow SF_TRACTOMICS {
         ch_synthstrip_weights = channel.fromPath(params.synthstrip_weights, checkIfExists: true)
     }
 
+    //
+    // Generate a lesion mask with LST-AI for subjects/sessions that have a FLAIR
+    // acquisition but no precomputed lesion mask.
+    ch_lesion_mask = ch_inputs.lesion_mask
+    if ( params.run_lst_ai_lesion_segmentation ) {
+        ch_lstai_input = ch_inputs.lesion_mask
+            .filter{ _meta, mask -> !mask }
+            .join(ch_inputs.flair.filter{ _meta, flair -> flair })
+            .join(ch_inputs.t1)
+            .map{ meta, _empty_mask, flair, t1 -> [meta, t1, flair] }
+
+        SEGMENTATION_LSTAI(ch_lstai_input)
+        ch_versions = ch_versions.mix(SEGMENTATION_LSTAI.out.versions)
+        ch_sub_multiqc_files = ch_sub_multiqc_files.mix(SEGMENTATION_LSTAI.out.lesion_stats)
+
+        // Use the precomputed mask when one exists; otherwise use the mask
+        // SEGMENTATION_LSTAI generated
+        ch_lesion_mask = ch_inputs.lesion_mask
+            .join(SEGMENTATION_LSTAI.out.lesion_mask, remainder: true)
+            .map{ meta, precomputed, generated -> [meta, precomputed ?: (generated ?: [])] }
+    }
+
     TRACTOFLOW(
         ch_inputs.dwi_bval_bvec,
         ch_inputs.t1,
@@ -112,7 +136,7 @@ workflow SF_TRACTOMICS {
         ch_bet_template,
         ch_bet_probability,
         ch_synthstrip_weights,
-        ch_inputs.lesion
+        ch_lesion_mask
             .filter{ it -> it[1] },
         [
             "preproc_dwi_run_denoising": params.run_dwi_denoising,
