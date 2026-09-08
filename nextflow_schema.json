@@ -901,6 +901,20 @@
                 }
             }
         },
+        "lesion_segmentation_options": {
+            "title": "Lesion segmentation options",
+            "type": "object",
+            "description": "Define the behaviour of the LST-AI lesion segmentation.",
+            "default": "",
+            "help_text": "Define SEGMENTATION_LSTAI, which generates a white-matter lesion mask from a T1w/FLAIR pair for subjects/sessions when nf-bids did not find a precomputed lesion mask under the BIDS derivatives/ tree (see assets/nf-bids_config.yml).",
+            "properties": {
+                "run_lst_ai_lesion_segmentation": {
+                    "type": "boolean",
+                    "description": "Run LST-AI to generate a lesion mask when none was found and a FLAIR acquisition is available.",
+                    "default": true
+                }
+            }
+        },
         "bundleseg_options": {
             "title": "BundleSeg options",
             "type": "object",
@@ -1224,6 +1238,9 @@
         },
         {
             "$ref": "#/$defs/generic_options"
+        },
+        {
+            "$ref": "#/$defs/lesion_segmentation_options"
         },
         {
             "$ref": "#/$defs/bundleseg_options"
