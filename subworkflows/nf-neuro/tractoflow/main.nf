@@ -423,6 +423,7 @@ workflow TRACTOFLOW {
         csf_map                 = ANATOMICAL_SEGMENTATION.out.csf_map
         aparc_aseg              = TRANSFORM_APARC_ASEG.out.warped_image
         wmparc                  = TRANSFORM_WMPARC.out.warped_image
+        lesion_mask             = TRANSFORM_LESION_MASK.out.warped_image
 
         // REGISTRATION
         anatomical_to_diffusion = T1_REGISTRATION.out.forward_image_transform
