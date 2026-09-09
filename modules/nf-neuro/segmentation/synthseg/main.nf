@@ -122,6 +122,12 @@ process SEGMENTATION_SYNTHSEG {
     if [[ -f "$lesion" ]];
     then
         mri_binarize --i ${prefix}__mask_wm.nii.gz --merge $lesion --min 0.5 --o ${prefix}__mask_wm.nii.gz
+
+        # Also correct the continuous tissue probability maps
+        mri_binarize --i $lesion --min 0.5 --inv --o inverse_lesion_mask.nii.gz
+        mri_concat --i ${prefix}__map_wm.nii.gz --i $lesion --max --o ${prefix}__map_wm.nii.gz
+        mri_mask ${prefix}__map_gm.nii.gz inverse_lesion_mask.nii.gz ${prefix}__map_gm.nii.gz
+        mri_mask ${prefix}__map_csf.nii.gz inverse_lesion_mask.nii.gz ${prefix}__map_csf.nii.gz
     fi
 
     mri_convert -i ${prefix}__mask_wm.nii.gz --out_data_type uchar -o ${prefix}__mask_wm.nii.gz
