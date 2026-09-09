@@ -11,6 +11,8 @@ include { softwareVersionsToYAML } from '../subworkflows/nf-core/utils_nfcore_pi
 include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_sf-tractomics_pipeline'
 include { TRACTOFLOW             } from '../subworkflows/nf-neuro/tractoflow'
 include { SEGMENTATION_LSTAI     } from '../modules/local/segmentation/lstai/main'
+include { REGISTRATION as REGISTRATION_FLAIR_TO_T1 } from '../subworkflows/nf-neuro/registration/main'
+include { REGISTRATION_ANTSAPPLYTRANSFORMS as TRANSFORM_LESION_MASK_TO_T1 } from '../modules/nf-neuro/registration/antsapplytransforms/main'
 include { TRACTOGRAM_MATH as ENSEMBLE_TRACKING } from '../modules/nf-neuro/tractogram/math/main'
 include { QC_TRACTOGRAM as QC_ENSEMBLE } from '../modules/nf-neuro/qc/tractogram/main'
 include { ATLAS_IIT              } from '../subworkflows/nf-neuro/atlas_iit/main'
@@ -118,6 +120,48 @@ workflow SF_TRACTOMICS {
             .join(SEGMENTATION_LSTAI.out.lesion_mask, remainder: true)
             .map{ meta, precomputed, generated -> [meta, precomputed ?: (generated ?: [])] }
     }
+
+    //
+    // Register FLAIR to T1w and warp the lesion mask into T1w-native space.
+    ch_lesion_mask_flair_space = ch_lesion_mask.filter{ _meta, mask -> mask }
+    ch_lesion_mask_for_flair_reg = ch_inputs.flair
+        .filter{ _meta, flair -> flair }
+        .join(ch_lesion_mask_flair_space)
+        .map{ meta, flair, _mask -> [meta, flair] }
+
+    REGISTRATION_FLAIR_TO_T1(
+        ch_inputs.t1,
+        ch_lesion_mask_for_flair_reg,
+        channel.empty(),
+        channel.empty(),
+        channel.empty(),
+        channel.empty(),
+        channel.empty(),
+        channel.empty(),
+        [
+            "run_easyreg": params.run_easyreg,
+            "run_synthmorph": params.run_synthmorph
+        ]
+    )
+    ch_versions = ch_versions.mix(REGISTRATION_FLAIR_TO_T1.out.versions)
+    ch_sub_multiqc_files = ch_sub_multiqc_files.mix(REGISTRATION_FLAIR_TO_T1.out.mqc)
+
+    TRANSFORM_LESION_MASK_TO_T1(
+        ch_lesion_mask_flair_space
+            .join(ch_inputs.t1)
+            .join(REGISTRATION_FLAIR_TO_T1.out.forward_image_transform)
+    )
+    ch_versions = ch_versions.mix(TRANSFORM_LESION_MASK_TO_T1.out.versions)
+
+    // Replace with the T1w-space warp where one was computed. 
+    ch_lesion_mask = ch_lesion_mask
+        .join(TRANSFORM_LESION_MASK_TO_T1.out.warped_image, remainder: true)
+        .map{ meta, original, warped ->
+            if ( original && !warped ) {
+                log.warn "[${meta.id}${meta.session ? "/" + meta.session : ""}] Lesion mask found but no FLAIR acquisition to register it from T1w space; using it as-is, which may be misaligned once warped to diffusion space."
+            }
+            [meta, warped ?: (original ?: [])]
+        }
 
     TRACTOFLOW(
         ch_inputs.dwi_bval_bvec,
@@ -338,7 +382,7 @@ workflow SF_TRACTOMICS {
             ch_bundle_seg,
             channel.empty(),
             ch_input_metrics,
-            channel.empty(),
+            TRACTOFLOW.out.lesion_mask,
             TRACTOFLOW.out.fodf)
         ch_versions = ch_versions.mix(TRACTOMETRY.out.versions)
 
