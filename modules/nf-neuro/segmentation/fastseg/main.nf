@@ -37,6 +37,12 @@ process SEGMENTATION_FASTSEG {
     if [[ -f "$lesion" ]];
     then
         scil_volume_math union ${prefix}__mask_wm.nii.gz $lesion ${prefix}__mask_wm.nii.gz --data_type uint8 -f
+
+        # Also correct the continuous tissue probability maps 
+        scil_volume_math invert $lesion inverse_lesion_mask.nii.gz -f
+        scil_volume_math maximum ${prefix}__map_wm.nii.gz $lesion ${prefix}__map_wm.nii.gz -f
+        scil_volume_math multiplication ${prefix}__map_gm.nii.gz inverse_lesion_mask.nii.gz ${prefix}__map_gm.nii.gz -f
+        scil_volume_math multiplication ${prefix}__map_csf.nii.gz inverse_lesion_mask.nii.gz ${prefix}__map_csf.nii.gz -f
     fi
 
     cat <<-END_VERSIONS > versions.yml
