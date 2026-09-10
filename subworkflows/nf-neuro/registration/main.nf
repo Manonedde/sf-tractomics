@@ -42,11 +42,33 @@ workflow REGISTRATION {
             //   - join [ meta, reference, image | null, ref-segmentation | null ]
             //   - join [ meta, reference, image | null, ref-segmentation | null, segmentation | null ]
             //   -  map [ meta, reference, image | [], ref-segmentation | [], segmentation | [] ]
+            //
+            // remainder:true only pads a missing side with a single null, not one null
+            // per field. Chaining .join(remainder:true) three times in a row grows the
+            // left side to 3+ data fields, so a subject present only in
+            // ch_moving_segmentation/ch_segmentation (absent from ch_moving_image) comes
+            // back as a short, misaligned tuple instead of null-padding every missing
+            // field -- and would crash the closure below outright. Bundle the fields
+            // accumulated so far into a single value before each subsequent join so
+            // every join stays a true 2-tuple-vs-2-tuple and the padding is always
+            // 1-for-1; default a missing bundle to same-shaped nulls so it can still be
+            // destructured, and unpack at the end.
             ch_register = ch_moving_image
                 .join(ch_fixed_image, remainder: true)
+                .map{ meta, moving_ref, moving_img -> [meta, [moving_ref, moving_img]] }
                 .join(ch_moving_segmentation, remainder: true)
+                .map{ meta, bundle1, moving_seg_val -> [meta, (bundle1 ?: [null, null]) + [moving_seg_val]] }
                 .join(ch_segmentation, remainder: true)
-                .map{ it[0..1] + [it[2] ?: [], it[3] ?: [], it[4] ?: []] }
+                .map{ meta, bundle2, seg_val ->
+                    def (final_ref, final_img, final_moving_seg) = bundle2 ?: [null, null, null]
+                    if ( final_ref == null ) {
+                        null
+                    }
+                    else {
+                        [meta, final_ref, final_img ?: [], final_moving_seg ?: [], seg_val ?: []]
+                    }
+                }
+                .filter{ it != null }
 
             REGISTRATION_EASYREG ( ch_register )
             ch_versions = ch_versions.mix(REGISTRATION_EASYREG.out.versions.first())
