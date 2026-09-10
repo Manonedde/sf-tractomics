@@ -72,10 +72,26 @@ workflow ANATOMICAL_SEGMENTATION {
 
 
             // ** Freesurfer segmentation ** //
+            // remainder:true only pads a missing side with a single null, not one null
+            // per field -- since ch_freesurferseg carries 2 data fields (aparc_aseg,
+            // wmparc), a lesion-only subject (absent from ch_freesurferseg) comes back
+            // as a 3-element tuple, not 4, and would crash the closure below outright.
+            // Bundle aparc_aseg+wmparc into a single value first so both sides of the
+            // join are true 2-tuples and the remainder padding is always 1-for-1.
             SEGMENTATION_FREESURFERSEG (
                 ch_freesurferseg
+                    .map{ meta, fs_aparc_aseg, fs_wmparc -> [meta, [fs_aparc_aseg, fs_wmparc]] }
                     .join(ch_lesion, remainder: true)
-                    .map{ it[0..2] + [it[3] ?: []] }
+                    .map{ meta, fs, lesion ->
+                        if ( fs == null ) {
+                            null
+                        }
+                        else {
+                            def (fs_out_aparc_aseg, fs_out_wmparc) = fs
+                            [meta, fs_out_aparc_aseg, fs_out_wmparc, lesion ?: []]
+                        }
+                    }
+                    .filter{ it != null }
             )
             ch_versions = ch_versions.mix(SEGMENTATION_FREESURFERSEG.out.versions.first())
 
