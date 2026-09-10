@@ -40,7 +40,6 @@ process BUNDLE_STATS {
     def endpoints = task.ext.endpoints ?: ""
     def mean_std = task.ext.mean_std ?: ""
     def volume = task.ext.volume ?: ""
-    def lesions = task.ext.lesions ?: ""
     def lesions_stats = (task.ext.lesions_stats && lesions) ? task.ext.lesions_stats : ""
     def min_lesion_vol = task.ext.min_lesion_vol ?: ""
     def streamline_count = task.ext.streamline_count ?: ""
