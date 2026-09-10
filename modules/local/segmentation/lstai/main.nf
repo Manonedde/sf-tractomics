@@ -2,13 +2,6 @@ process SEGMENTATION_LSTAI {
     tag "$meta.id"
     label 'process_high'
 
-    // v2.0.0 proper is not published yet (as of this writing); v2.0.0rc1 is the
-    // newest tag matching the --device/--stripped/--threshold CLI used below (the
-    // v1.x line is TensorFlow-based, with a different CLI). Bump to the plain
-    // "v2.0.0" tag once https://hub.docker.com/r/jqmcginnis/lst-ai publishes it.
-    // Swap to the CUDA flavour (same tag without the "-cpu" suffix) and set
-    // task.ext.device to a GPU index to run on GPU; see conf/gpu.config for the
-    // override.
     container "jqmcginnis/lst-ai:v2.0.0rc1-cpu"
 
     // The image bakes in ENTRYPOINT ["lst"] / CMD ["--help"] (it's meant to be run
