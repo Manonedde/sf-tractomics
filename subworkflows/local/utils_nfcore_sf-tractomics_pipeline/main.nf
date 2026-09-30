@@ -209,26 +209,33 @@ workflow PIPELINE_INITIALISATION {
                     t1w = t1w[0]
                 }
 
-                // Lesion mask: a precomputed lesion mask found under the
-                // BIDS derivatives/ tree
-                def lesion_mask = item.lesion_mask?.nii ?: item.lesion_mask_unreviewed?.nii ?: []
-                if ( lesion_mask instanceof List && lesion_mask.size() > 1 ) {
-                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple derivatives lesion masks found. Using the last one for processing."
-                    lesion_mask = lesion_mask[-1]
+                // Lesion mask: a precomputed *_lesion_mask.nii.gz found under the
+                // BIDS derivatives/ tree. nf-bids gives every *_mask file (brain masks,
+                // etc.), so keep only the lesion masks here.
+                def lesion_mask = normalizeToList(item.lesion_mask?.nii)
+                    .findAll { f -> isDerivative(f) && f.toString().endsWith("_lesion_mask.nii.gz") }
+                if ( lesion_mask.size() > 1 ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple derivatives lesion masks found. Using the last one for processing: ${lesion_mask[-1]}"
                 }
-                else if ( lesion_mask instanceof List ) {
-                    lesion_mask = lesion_mask ? lesion_mask[0] : []
-                }
+                lesion_mask = lesion_mask ? lesion_mask[-1] : []
 
                 // Raw FLAIR acquisition, used as SEGMENTATION_LSTAI input (together with
                 // the T1w already selected above) when no precomputed lesion mask exists.
-                def flair = item.lesion_candidate_flair?.nii ?: []
-                if ( flair instanceof List && flair.size() > 1 ) {
-                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple FLAIR images found. Using the last one for LST-AI lesion segmentation."
-                    flair = flair[-1]
+                def flair = normalizeToList(item.lesion_candidate_flair?.nii)
+                    .findAll { f -> !isDerivative(f) }
+                if ( flair.size() > 1 ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple FLAIR images found. Using the last one for LST-AI lesion segmentation: ${flair[-1]}"
                 }
-                else if ( flair instanceof List ) {
-                    flair = flair ? flair[0] : []
+                flair = flair ? flair[-1] : []
+
+                if ( lesion_mask ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Using precomputed lesion mask: ${lesion_mask}"
+                }
+                else if ( flair ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] No precomputed lesion mask, lesions will be segmented with LST-AI from: ${flair}"
+                }
+                else {
+                    logs << "[${id}${ses ? "/" + ses : ""}] No lesion mask nor FLAIR found. No lesion correction."
                 }
 
                 // Get Freesurfer parcellations if exists
@@ -607,6 +614,13 @@ def normalizeToList(value) {
     if (value == null) return []
     if (value instanceof List) return value
     return [value]
+}
+
+//
+// True if the file lives under a BIDS derivatives/ directory.
+//
+def isDerivative(path) {
+    return path.toString() ==~ /(^|.*\/)derivatives\/.*/
 }
 
 //

@@ -373,6 +373,9 @@ workflow TRACTOFLOW {
                 .join(ANATOMICAL_SEGMENTATION.out.csf_map)
                 .join(ch_diffusion_model)
                 .join(RECONST_DTIMETRICS.out.fa)
+                .join(TRANSFORM_LESION_MASK.out.warped_image, remainder: true)
+                .filter{ it[1] }
+                .map{ it[0..5] + [it[6] ?: []] }
             TRACKING_PFTTRACKING( ch_input_pft_tracking )
 
             ch_versions = ch_versions.mix(TRACKING_PFTTRACKING.out.versions.first())
@@ -394,6 +397,9 @@ workflow TRACTOFLOW {
             ch_input_local_tracking = ANATOMICAL_SEGMENTATION.out.wm_mask
                 .join(ch_diffusion_model)
                 .join(RECONST_DTIMETRICS.out.fa)
+                .join(TRANSFORM_LESION_MASK.out.warped_image, remainder: true)
+                .filter{ it[1] }
+                .map{ it[0..3] + [it[4] ?: []] }
             TRACKING_LOCALTRACKING( ch_input_local_tracking )
 
             ch_versions = ch_versions.mix(TRACKING_LOCALTRACKING.out.versions.first())
