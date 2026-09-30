@@ -6,7 +6,7 @@ process TRACKING_PFTTRACKING {
     container "scilus/scilpy:2.2.2_cpu"
 
     input:
-        tuple val(meta), path(wm), path(gm), path(csf), path(fodf), path(fa)
+        tuple val(meta), path(wm), path(gm), path(csf), path(fodf), path(fa), path(lesion) //** optional, input = [] **//
 
     output:
         tuple val(meta), path("*__pft_tracking.trk")            , emit: trk
@@ -66,6 +66,10 @@ process TRACKING_PFTTRACKING {
         scil_volume_math union ${prefix}__pft_seeding_mask.nii.gz \
             ${prefix}__interface.nii.gz ${prefix}__pft_seeding_mask.nii.gz \
             --data_type uint8 -f
+        if [[ -f "$lesion" ]]; then
+            scil_volume_math union ${prefix}__pft_seeding_mask.nii.gz $lesion \
+                ${prefix}__pft_seeding_mask.nii.gz --data_type uint8 -f
+        fi
 
     elif [ "${pft_seeding_mask}" == "interface" ]; then
         mv ${prefix}__interface.nii.gz ${prefix}__pft_seeding_mask.nii.gz
@@ -73,7 +77,12 @@ process TRACKING_PFTTRACKING {
     elif [ "${pft_seeding_mask}" == "fa" ]; then
         scil_volume_math lower_threshold $fa $pft_fa_threshold \
             ${prefix}__pft_seeding_mask.nii.gz --data_type uint8 -f
+        if [[ -f "$lesion" ]]; then
+            scil_volume_math union ${prefix}__pft_seeding_mask.nii.gz $lesion \
+                ${prefix}__pft_seeding_mask.nii.gz --data_type uint8 -f
+        fi
     fi
+
 
     pft_step_size="$pft_step"
     if [[ -z "$pft_step" ]] && [[ -n "$pft_step_pct" ]]; then
