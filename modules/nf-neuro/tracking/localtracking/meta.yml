@@ -35,6 +35,13 @@ input:
         pattern: "*.{nii,nii.gz}"
         ontologies:
           - edam: http://edamontology.org/format_4001 # NIFTI format
+    - lesion:
+        type: file
+        description: Optional binary lesion mask in diffusion space, added to the seeding mask and the tracking mask.
+        pattern: "*.{nii,nii.gz}"
+        mandatory: false
+        ontologies:
+          - edam: http://edamontology.org/format_4001 # NIFTI format
 args:
   - local_fa_tracking_mask_threshold:
       type: float

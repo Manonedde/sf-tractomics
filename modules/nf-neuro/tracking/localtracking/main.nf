@@ -5,7 +5,7 @@ process TRACKING_LOCALTRACKING {
     container "scilus/scilpy:2.2.2_gpu"
 
     input:
-    tuple val(meta), path(wm), path(fodf), path(fa)
+    tuple val(meta), path(wm), path(fodf), path(fa), path(lesion) //** optional, input = [] **//
 
     output:
     tuple val(meta), path("*__local_tracking.trk"), emit: trk
@@ -93,6 +93,14 @@ process TRACKING_LOCALTRACKING {
             $local_fa_seeding_mask_threshold \
             ${prefix}__local_seeding_mask.nii.gz \
             --data_type uint8 -f
+    fi
+
+    # Lesions are not WM on the tissue maps, add them explicitly to the seeding and tracking masks
+    if [[ -f "$lesion" ]]; then
+        scil_volume_math union ${prefix}__local_seeding_mask.nii.gz $lesion \
+            ${prefix}__local_seeding_mask.nii.gz --data_type uint8 -f
+        scil_volume_math union ${prefix}__local_tracking_mask.nii.gz $lesion \
+            ${prefix}__local_tracking_mask.nii.gz --data_type uint8 -f
     fi
 
     scil_tracking_local $fodf ${prefix}__local_seeding_mask.nii.gz \
