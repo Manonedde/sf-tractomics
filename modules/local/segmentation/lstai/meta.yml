@@ -89,10 +89,10 @@ output:
           description: |
             Groovy Map containing sample information
             e.g. `[ id:'test', single_end:false ]`
-      - "*__mask_lesion.nii.gz":
+      - "*_lesion_mask.nii.gz":
           type: file
           description: Binary white matter lesion mask, in FLAIR space.
-          pattern: "*__mask_lesion.{nii,nii.gz}"
+          pattern: "*_lesion_mask.{nii,nii.gz}"
           ontologies:
             - edam: http://edamontology.org/format_4001 # NIFTI format
   lesion_mask_annotated:
@@ -101,12 +101,12 @@ output:
           description: |
             Groovy Map containing sample information
             e.g. `[ id:'test', single_end:false ]`
-      - "*__desc-annotated_mask_lesion.nii.gz":
+      - "*_desc-annotated_mask_lesion.nii.gz":
           type: file
           description: Lesion mask with each lesion anatomically annotated (McDonald
             criteria) using a FastSurfer parcellation of the T1w. Not produced when
             task.ext.segment_only is set.
-          pattern: "*__desc-annotated_mask_lesion.{nii,nii.gz}"
+          pattern: "*_desc-annotated_mask_lesion.{nii,nii.gz}"
           ontologies:
             - edam: http://edamontology.org/format_4001 # NIFTI format
   lesion_stats:
@@ -115,21 +115,21 @@ output:
           description: |
             Groovy Map containing sample information
             e.g. `[ id:'test', single_end:false ]`
-      - "*__lesion_stats.csv":
+      - "*_lesion_stats.csv":
           type: file
           description: Per-lesion statistics (e.g. volume) for the binary segmentation.
-          pattern: "*__lesion_stats.csv"
+          pattern: "*_lesion_stats.csv"
   lesion_stats_annotated:
     - - meta:
           type: map
           description: |
             Groovy Map containing sample information
             e.g. `[ id:'test', single_end:false ]`
-      - "*__annotated_lesion_stats.csv":
+      - "*_lesion_stats_annotated.csv":
           type: file
           description: Per-lesion statistics broken down by anatomical region. Not
             produced when task.ext.segment_only is set.
-          pattern: "*__annotated_lesion_stats.csv"
+          pattern: "*_lesion_stats_annotated.csv"
   versions:
     - versions.yml:
         type: file

@@ -21,10 +21,10 @@ process SEGMENTATION_LSTAI {
         tuple val(meta), path(t1), path(flair)
 
     output:
-        tuple val(meta), path("*__mask_lesion.nii.gz")                   , emit: lesion_mask
-        tuple val(meta), path("*__desc-annotated_mask_lesion.nii.gz")    , emit: lesion_mask_annotated, optional: true
-        tuple val(meta), path("*__lesion_stats.csv")                     , emit: lesion_stats, optional: true
-        tuple val(meta), path("*__annotated_lesion_stats.csv")           , emit: lesion_stats_annotated, optional: true
+        tuple val(meta), path("*_lesion_mask.nii.gz")                   , emit: lesion_mask
+        tuple val(meta), path("*_desc-annotated_mask_lesion.nii.gz")    , emit: lesion_mask_annotated, optional: true
+        tuple val(meta), path("*_lesion_stats.csv")                     , emit: lesion_stats, optional: true
+        tuple val(meta), path("*_lesion_stats_annotated.csv")           , emit: lesion_stats_annotated, optional: true
         path "versions.yml"                                              , emit: versions
 
     when:
@@ -56,12 +56,12 @@ process SEGMENTATION_LSTAI {
         $clipping \
         $fast_mode
 
-    mv lst_output/space-flair_seg-lst.nii.gz ${prefix}__mask_lesion.nii.gz
-    mv lst_output/lesion_stats.csv ${prefix}__lesion_stats.csv
+    mv lst_output/space-flair_seg-lst.nii.gz ${prefix}_lesion_mask.nii.gz
+    mv lst_output/lesion_stats.csv ${prefix}_lesion_stats.csv
 
     if [[ -f lst_output/space-flair_desc-annotated_seg-lst.nii.gz ]]; then
-        mv lst_output/space-flair_desc-annotated_seg-lst.nii.gz ${prefix}__desc-annotated_mask_lesion.nii.gz
-        mv lst_output/annotated_lesion_stats.csv ${prefix}__annotated_lesion_stats.csv
+        mv lst_output/space-flair_desc-annotated_seg-lst.nii.gz ${prefix}_desc-annotated_mask_lesion.nii.gz
+        mv lst_output/annotated_lesion_stats.csv ${prefix}_lesion_stats_annotated.csv
     fi
 
     cat <<-END_VERSIONS > versions.yml
@@ -84,10 +84,10 @@ process SEGMENTATION_LSTAI {
 
     lst -h
 
-    touch ${prefix}__mask_lesion.nii.gz
-    touch ${prefix}__desc-annotated_mask_lesion.nii.gz
-    touch ${prefix}__lesion_stats.csv
-    touch ${prefix}__annotated_lesion_stats.csv
+    touch ${prefix}_lesion_mask.nii.gz
+    touch ${prefix}_desc-annotated_mask_lesion.nii.gz
+    touch ${prefix}_lesion_stats.csv
+    touch ${prefix}_lesion_stats_annotated.csv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
