@@ -53,30 +53,19 @@ sbref_full:
       ap:
         direction: dir-AP
 
+# nf-bids only understands BIDS entities + suffix: it has no filename or
+# derivatives filter, and "lesion" in "*_lesion_mask.nii.gz" is not an entity.
+# So every *_mask file of a subject/session lands here (brain masks included),
+# and the pipeline keeps only derivatives/**/*_lesion_mask.nii.gz
+# (see PIPELINE_INITIALISATION).
 lesion_mask:
   suffix_maps_to: "mask"
   sequential_set:
     by_entity: "run"
-    derivatives: true
-    filename_pattern: "(?i).*(desc-annotated|desc-lesion).*\\.nii\\.gz$"
-  also_try: ["lesion_mask_unreviewed", "lesion_candidate_unit1", "lesion_candidate_flair"]
-  not_found_message: "White matter lesions were not generated."
 
-lesion_mask_unreviewed:
-  suffix_maps_to: "mask"
-  sequential_set:
-    by_entity: "run"
-    derivatives: true
-    filename_pattern: "(?i)(?!.*desc-annotated)(?!.*desc-lesion).*\\.nii\\.gz$"
-
-lesion_candidate_unit1:
-  suffix_maps_to: "UNIT1"
-  sequential_set:
-    by_entity: "run"
-    derivatives: false
-
+# FLAIR used by LST-AI when no lesion mask was found. Only raw (non-derivatives)
+# files are kept by the pipeline.
 lesion_candidate_flair:
   suffix_maps_to: "FLAIR"
   sequential_set:
     by_entity: "run"
-    derivatives: false
