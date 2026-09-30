@@ -36,6 +36,7 @@ nextflow_process {
                         file("\${test_data_directory}/map_gm.nii.gz"),
                         file("\${test_data_directory}/map_csf.nii.gz"),
                         file("\${test_data_directory}/fodf.nii.gz"),
+                        [],
                         []
                     ]}
                 """
@@ -67,7 +68,8 @@ nextflow_process {
                         file("\${test_data_directory}/map_gm.nii.gz"),
                         file("\${test_data_directory}/map_csf.nii.gz"),
                         file("\${test_data_directory}/fodf.nii.gz"),
-                        file("\${test_data_directory}/fa.nii.gz")
+                        file("\${test_data_directory}/fa.nii.gz"),
+                        []
                     ]}
             """
             }
@@ -98,6 +100,7 @@ nextflow_process {
                         file("\${test_data_directory}/map_gm.nii.gz"),
                         file("\${test_data_directory}/map_csf.nii.gz"),
                         file("\${test_data_directory}/fodf.nii.gz"),
+                        [],
                         []
                     ]}
             """
@@ -130,7 +133,8 @@ nextflow_process {
                         file("\${test_data_directory}/map_gm.nii.gz"),
                         file("\${test_data_directory}/map_csf.nii.gz"),
                         file("\${test_data_directory}/fodf.nii.gz"),
-                        file("\${test_data_directory}/fa.nii.gz")
+                        file("\${test_data_directory}/fa.nii.gz"),
+                        []
                     ]
                 }
                 """
