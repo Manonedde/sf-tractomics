@@ -51,6 +51,14 @@ jobs:
         with:
           apptainer-version: 1.3.6
 
+      - name: Setup Node.js
+        # nf-core/setup-nextflow@v3+ is a JavaScript action that requires node on the
+        # runner. GitHub-hosted runners have it pre-installed, but self-hosted runners
+        # (scilus-docker-large) do not, so we install it explicitly before the action runs.
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+
       - name: Install Nextflow
         uses: nf-core/setup-nextflow@v3.0.0
         with:
