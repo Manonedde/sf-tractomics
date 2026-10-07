@@ -1,2 +1,0 @@
-io/readbids:
-  - "modules/nf-neuro/io/readbids/**"

@@ -19,7 +19,8 @@ workflow REGISTRATION {
         ch_fixed_image                  // channel: [ val(meta), image ]
         ch_moving_image                 // channel: [ val(meta), reference ]
         ch_metric                       // channel: [ val(meta), metric ], optional
-        ch_fixed_mask                   // channel: [ val(meta), mask ], optional
+        ch_fixed_mask                   // channel: [ val(meta), fixed_mask ], optional
+        ch_moving_mask                  // channel: [ val(meta), moving_mask ], optional
         ch_segmentation                 // channel: [ val(meta), segmentation ], optional
         ch_moving_segmentation          // channel: [ val(meta), segmentation ], optional
         ch_freesurfer_license           // channel: [ license ], optional
@@ -199,7 +200,8 @@ workflow REGISTRATION {
             //   - map  [ meta, image, mask | [] ]
             ch_register = ch_register.ants_syn
                 .join(ch_fixed_mask, remainder: true)
-                .map{ it[0..2] + [it[4] ?: []] }
+                .join(ch_moving_mask, remainder: true)
+                .map{ it[0..2] + [it[4] ?: []] + [it[5] ?: []] }
 
             REGISTRATION_ANTS ( ch_register )
             ch_versions = ch_versions.mix(REGISTRATION_ANTS.out.versions.first())

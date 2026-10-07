@@ -15,7 +15,7 @@ include { completionEmail           } from '../../nf-core/utils_nfcore_pipeline'
 include { completionSummary         } from '../../nf-core/utils_nfcore_pipeline'
 include { UTILS_NFCORE_PIPELINE     } from '../../nf-core/utils_nfcore_pipeline'
 include { UTILS_NEXTFLOW_PIPELINE   } from '../../nf-core/utils_nextflow_pipeline'
-include { IO_BIDS                   } from '../../nf-neuro/io_bids/main'
+include { fromBIDS                  } from 'plugin/nf-bids'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -31,8 +31,8 @@ workflow PIPELINE_INITIALISATION {
     _monochrome_logs  // boolean: Do not use coloured log outputs
     nextflow_cli_args //   array: List of positional nextflow CLI args
     outdir            //  string: The output directory where the results will be saved
-    input            //  string: Path to input samplesheet
-    bids_config      //  string: Path to BIDS JSON configuration file
+    input             //  string: Path to input directory or input samplesheet
+    fs                //  string: Path to FreeSurfer directory
     help              // boolean: Display help message and exit
     help_full         // boolean: Show the full help message
     show_hidden       // boolean: Show hidden parameters in the help message
@@ -40,7 +40,6 @@ workflow PIPELINE_INITIALISATION {
     main:
 
     ch_versions = channel.empty()
-    ch_samplesheet = channel.empty()
 
     //
     // Print version and exit if required and dump pipeline parameters to JSON file
@@ -108,302 +107,418 @@ workflow PIPELINE_INITIALISATION {
         nextflow_cli_args
     )
 
-    //
-    // Create channel from input file provided through params.bids_config or params.input
-    //
-    if (bids_config) {
-        ch_samplesheet = channel
-            .fromList(parseBidsConfig(bids_config))
-            .map {
-                meta, dwi, bval, bvec, sbref, rev_dwi, rev_bval, rev_bvec, rev_sbref, t1, wmparc, aparc_aseg, lesion ->
-                    return [
-                        meta,
-                        dwi,
-                        bval,
-                        bvec,
-                        sbref ?: [],
-                        rev_dwi ?: [],
-                        rev_bval ?: [],
-                        rev_bvec ?: [],
-                        rev_sbref ?: [],
-                        t1,
-                        wmparc ?: [],
-                        aparc_aseg ?: [],
-                        lesion ?: []
-                    ]
-            }
-            .map { samplesheet ->
-                validateInputSamplesheet(samplesheet)
-            }.multiMap { meta, dwi, bval, bvec, sbref, rev_dwi, rev_bval, rev_bvec, rev_sbref, t1, wmparc, aparc_aseg, lesion ->
-                t1: [meta, t1]
-                wmparc: [meta, wmparc]
-                aparc_aseg: [meta, aparc_aseg]
-                dwi_bval_bvec: [meta, dwi, bval, bvec]
-                b0: [meta, sbref]
-                rev_dwi_bval_bvec: [meta, rev_dwi, rev_bval, rev_bvec]
-                rev_b0: [meta, rev_sbref]
-                lesion: [meta, lesion]
-            }
-
-        if (params.participants_tsv) {
-            participants_tsv_path = params.participants_tsv
-        }
-        else {
-            participants_tsv_path = null
-            log.warn("No participants.tsv provided, covariates will not be used.")
-        }
+    if (workflow.profile.contains('gpu') && !params.gpu_type) {
+        error "When using the 'gpu' profile, you must specify --gpu_type (e.g. h100 or a100)."
     }
-    else if (input) {
+
+    //
+    // Create channel from input file provided through params.input
+    //
+    if (input) {
+        log.info "Input ${input}"
         //
         // params.input is either a BIDS compliant directory or a samplesheet
         //   - if directory, we assume it is BIDS
         //   - everything else is a samplesheet
         //
         if (file(input).isDirectory()) {
-            IO_BIDS(
-                channel.fromPath(input),
-                channel.value(params.fsbids ?: []),
-                channel.value(params.bidsignore ?: [])
-            )
-            ch_samplesheet = [
-                t1: IO_BIDS.out.ch_t1,
-                wmparc: IO_BIDS.out.ch_wmparc,
-                aparc_aseg: IO_BIDS.out.ch_aparc_aseg,
-                dwi_bval_bvec: IO_BIDS.out.ch_dwi_bval_bvec,
-                b0: IO_BIDS.out.ch_b0,
-                rev_dwi_bval_bvec: IO_BIDS.out.ch_rev_dwi_bval_bvec,
-                rev_b0: IO_BIDS.out.ch_rev_b0,
-                lesion: channel.empty()
-            ]
+            log.info "Input is a BIDS directory. Using nf-bids plugin to parse the BIDS dataset."
+            // ** To support comma separated participant labels and list ** //
+            def participant_ids = params.participant_label ?
+                params.participant_label instanceof String ?
+                params.participant_label.tokenize(",") :
+                params.participant_label : []
 
-            if (params.participants_tsv) {
-                participants_tsv_path = "${params.participants_tsv}"
-            }
-            else if (file("${input}/participants.tsv").exists()) {
-                participants_tsv_path = "${input}/participants.tsv"
-            }
-            else {
-                participants_tsv_path = null
-                log.warn("No participants.tsv provided, covariates will not be used.")
+            ch_inputs = channel.fromBIDS(
+                input,
+                "$projectDir/assets/nf-bids_config.yml",
+                [flatten_output: true,
+                unpack_json_sidecar: true]
+            )
+            .filter { item -> participant_ids.isEmpty() || item.meta.subject in participant_ids }
+            .flatMap { item ->
+                def id = item.meta.subject
+                def ses = item.meta.session == "NA" ? null : item.meta.session
+
+                // If harmonization is enabled, fetch age, sex and site.
+                // Flag subjects with missing information and exit.
+                if (params.harmonization_reference) {
+                    if (!item.meta.age || !item.meta.sex || !item.meta.site) {
+                        error "ERROR: Missing age, sex or site for participant ${id}${ses ? " and session " + ses : ""} in BIDS dataset. Please validate."
+                    }
+                }
+
+                // ** Instantiate a variable that will collect prints related to BIDS file matching ** //
+                // ** to be printed in a log file later                                             ** //
+                def logs = []
+
+                // DWI and associated files
+                def dwi = item.dwi?.nii ?: []
+                def dwi_json = item.dwi?.json ?: []
+                def dwi_bval = item.dwi?.bval ?: []
+                def dwi_bvec = item.dwi?.bvec ?: []
+
+                // DWI AP/PA
+                def dwi_ap = item.dwi_full?.ap?.nii ?: []
+                def dwi_ap_json = item.dwi_full?.ap?.json ?: []
+                def dwi_ap_bval = item.dwi_full?.ap?.bval ?: []
+                def dwi_ap_bvec = item.dwi_full?.ap?.bvec ?: []
+                def dwi_pa = item.dwi_full?.pa?.nii ?: []
+                def dwi_pa_json = item.dwi_full?.pa?.json ?: []
+                def dwi_pa_bval = item.dwi_full?.pa?.bval ?: []
+                def dwi_pa_bvec = item.dwi_full?.pa?.bvec ?: []
+
+                // ** Figuring out which DWI to use for the pipeline ** //
+                // ** dwi should be mutually exclusive with dwi_ap and dwi_pa ** //
+                // ** but taking the PA/AP if available **//
+                def use_ap_pa = dwi_ap || dwi_pa
+                if ( dwi && use_ap_pa ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Both single DWI and AP/PA DWI found. Using AP/PA DWI " +
+                            "for processing. Use .bidsignore to override."
+                }
+
+                // Sbref
+                def sbref = item.sbref?.nii ?: []
+                def sbref_json = item.sbref?.json ?: []
+
+                // Sbref AP/PA
+                def sbref_ap = item.sbref_full?.ap?.nii ?: []
+                def sbref_ap_json = item.sbref_full?.ap?.json ?: []
+                def sbref_pa = item.sbref_full?.pa?.nii ?: []
+                def sbref_pa_json = item.sbref_full?.pa?.json ?: []
+
+                // EPI
+                def epi = item.epi?.nii ?: []
+                def epi_json = item.epi?.json ?: []
+
+                // EPI AP/PA
+                def epi_ap = item.epi_full?.ap?.nii ?: []
+                def epi_ap_json = item.epi_full?.ap?.json ?: []
+                def epi_pa = item.epi_full?.pa?.nii ?: []
+                def epi_pa_json = item.epi_full?.pa?.json ?: []
+
+                // T1w
+                // ** Note: we don't need the JSON files for T1w ** //
+                def t1w = item.T1w?.nii ?: []
+
+                if ( t1w && t1w.size() > 1 ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple T1w images found. Using the last one for processing. Use .bidsignore to override."
+                    t1w = t1w[-1]
+                }
+                else if ( t1w ){
+                    t1w = t1w[0]
+                }
+
+                // Get Freesurfer parcellations if exists
+                def (aparc_aseg, wmparc, fs_log) = getFreeSurferParcellations(fs, id, ses)
+                logs << fs_log
+
+                // ** Starting with AP/PA, look if there are multiple runs ** //
+                def files = []
+                if ( !t1w ) {
+                    // No T1w
+                    log.warn "No T1w found for this subject id: ${id} ${ses ? "and session: " + ses : ""}. Skipping."
+                }
+                else if ( use_ap_pa ) {
+                    // ** We might get only one of the two, so assume AP by default, if absent, use PA ** //
+                    def primary_nii = []
+                    def primary_json = []
+                    def primary_bval = []
+                    def primary_bvec = []
+                    def reverse_nii = []
+                    def reverse_json = []
+                    def reverse_bval = []
+                    def reverse_bvec = []
+                    if (dwi_ap) {
+                        primary_nii = normalizeToList(dwi_ap)
+                        primary_json = normalizeToList(dwi_ap_json)
+                        primary_bval = normalizeToList(dwi_ap_bval)
+                        primary_bvec = normalizeToList(dwi_ap_bvec)
+                        reverse_nii = normalizeToList(dwi_pa)
+                        reverse_json = normalizeToList(dwi_pa_json)
+                        reverse_bval = normalizeToList(dwi_pa_bval)
+                        reverse_bvec = normalizeToList(dwi_pa_bvec)
+                    } else {
+                        primary_nii = normalizeToList(dwi_pa)
+                        primary_json = normalizeToList(dwi_pa_json)
+                        primary_bval = normalizeToList(dwi_pa_bval)
+                        primary_bvec = normalizeToList(dwi_pa_bvec)
+                        reverse_nii = normalizeToList(dwi_ap)
+                        reverse_json = normalizeToList(dwi_ap_json)
+                        reverse_bval = normalizeToList(dwi_ap_bval)
+                        reverse_bvec = normalizeToList(dwi_ap_bvec)
+                    }
+                    primary_nii.eachWithIndex { nii, idx ->
+                        def run_id = extractRunFromFilename(nii) ?: (primary_nii.size() > 1 ? "${idx + 1}" : "")
+                        def rev_idx = findMatchingReverseFile(nii, reverse_nii)
+                        // ** Before mixing the AP/PA, check if the PhaseEncodingDirection are opposite ** //
+                        def pe_check = [matched: true, warnings: [], pe: null]
+                        if (rev_idx != null) {
+                            pe_check = areOppositePhaseEncoding(pe_check, primary_json[idx], reverse_json[rev_idx])
+                            if (!pe_check.matched) {
+                                logs << "[${id}${ses ? "/" + ses : ""}${run_id ? '/run-' + run_id : ''}] ${pe_check.warnings.join(" ")}"
+                            }
+                        }
+
+                        def readout = primary_json[idx]?.TotalReadoutTime ?: primary_json[idx]?.EstimatedTotalReadoutTime ?: params.dwi_susceptibility_readout
+
+                        // ** Finding possible sbref and epi candidates for this DWI run ** //
+                        def sbref_candidates = []
+                        [
+                            [sbref_ap, sbref_ap_json, "AP"], [sbref_pa, sbref_pa_json, "PA"], [sbref, sbref_json, "NA"]
+                        ].each { group ->
+                            def nii_list = normalizeToList(group[0])
+                            def json_list = normalizeToList(group[1])
+                            nii_list.eachWithIndex { snii, sidx ->
+                                sbref_candidates << [nii: snii, json: json_list[sidx], direction: group[2]]
+                            }
+                        }
+                        def epi_candidates = []
+                        [
+                            [epi_ap, epi_ap_json, "AP"], [epi_pa, epi_pa_json, "PA"], [epi, epi_json, "NA"]
+                        ].each { group ->
+                            def nii_list = normalizeToList(group[0])
+                            def json_list = normalizeToList(group[1])
+                            nii_list.eachWithIndex { enii, eidx ->
+                                epi_candidates << [nii: enii, json: json_list[eidx], direction: group[2]]
+                            }
+                        }
+
+                        // ** Inspecting the JSON metadata to find matches ** //
+                        def sbref_match = []
+                        sbref_candidates.each { candidate ->
+                            def match = matchFilesToDWI(
+                                primary_json[idx],
+                                nii,
+                                rev_idx ? reverse_json[rev_idx] : [:],
+                                rev_idx ? reverse_nii[rev_idx] : null,
+                                candidate.json       // JSON file
+                            )
+
+                            if (match.matched) {
+                                sbref_match << [nii: candidate.nii, json: candidate.json]
+                            }
+                            match.warnings.each { w ->
+                                logs << "[${id}${ses ? "/" + ses : ""}${run_id ? '/run-' + run_id : ''}] WARN (sbref) ${w}"
+                            }
+                        }
+
+                        def epi_match = []
+                        epi_candidates.each { candidate ->
+                            def match = matchFilesToDWI(
+                                primary_json[idx],
+                                nii,
+                                rev_idx ? reverse_json[rev_idx] : [:],
+                                rev_idx ? reverse_nii[rev_idx] : null,
+                                candidate.json       // JSON file
+                            )
+
+                            if (match.matched) {
+                                epi_match << [nii: candidate.nii, json: candidate.json]
+                            }
+                            match.warnings.each { w ->
+                                logs << "[${id}${ses ? "/" + ses : ""}${run_id ? '/run-' + run_id : ''}] WARN (epi) ${w}"
+                            }
+                        }
+
+                        if (!sbref_match && !epi_match) {
+                            logs << "[${id}${ses ? "/" + ses : ""}${run_id ? '/run-' + run_id : ''}] No matching sbref or epi found for this DWI run."
+                        }
+
+                        // ** Organize the matched sbref/epi files by alignment with main DWI PE ** //
+                        def sbref_split = splitByPEDirection(sbref_match, primary_json[idx])
+                        def epi_split = splitByPEDirection(epi_match, primary_json[idx])
+
+                        files << [
+                            [id: id,
+                            session: ses ?: "",
+                            run: run_id,
+                            readout: readout,
+                            pe: pe_check.pe,
+                            age: item.meta.age,
+                            sex: item.meta.sex ? (item.meta.sex.toString().trim().toLowerCase() in ['m', 'male', '1'] ? 1 : item.meta.sex.toString().trim().toLowerCase() in ['f', 'female', '2'] ? 2 : 1) : 1,
+                            handedness: item.meta.handedness ? (item.meta.handedness?.toLowerCase().contains("r") ? 1 : item.meta.handedness?.toLowerCase().contains("l") ? 2 : 1) : 1,
+                            disease: item.meta.disease ?: "HC",
+                            site: item.meta.site],
+                            t1w,
+                            wmparc,
+                            aparc_aseg,
+                            [nii, primary_bval[idx], primary_bvec[idx]],
+                            (rev_idx != null) ? [reverse_nii[rev_idx], reverse_bval[rev_idx], reverse_bvec[rev_idx]] : [],
+                            sbref_split?.same?.find()?.nii ?: epi_split?.same?.find()?.nii ?: [],
+                            sbref_split?.opposite?.find()?.nii ?: epi_split?.opposite?.find()?.nii ?: [],
+                            []
+                        ]
+                    }
+                }
+                else if (dwi) {
+                    // ** In this case, we have a DWI without the dir- entity, but we may have runs ** //
+                    def dwi_list = normalizeToList(dwi)
+                    def dwi_json_list = normalizeToList(dwi_json)
+                    def dwi_bval_list = normalizeToList(dwi_bval)
+                    def dwi_bvec_list = normalizeToList(dwi_bvec)
+
+                    dwi_list.eachWithIndex { nii, idx ->
+                        def run_id = extractRunFromFilename(nii) ?: (dwi_list.size() > 1 ? "${idx + 1}" : "")
+                        def readout = dwi_json_list[idx]?.TotalReadoutTime ?: dwi_json_list[idx]?.EstimatedTotalReadoutTime ?: params.dwi_susceptibility_readout
+                        def axisMap = [j: "y"]
+                        def pe = axisMap[dwi_json_list[idx]?.PhaseEncodingDirection]
+
+                        // ** Finding possible sbref and epi candidates for this DWI run ** //
+                        def sbref_candidates = []
+                        [
+                            [sbref_ap, sbref_ap_json, "AP"], [sbref_pa, sbref_pa_json, "PA"], [sbref, sbref_json, "NA"]
+                        ].each { group ->
+                            def nii_list = normalizeToList(group[0])
+                            def json_list = normalizeToList(group[1])
+                            nii_list.eachWithIndex { snii, sidx ->
+                                sbref_candidates << [nii: snii, json: json_list[sidx], direction: group[2]]
+                            }
+                        }
+
+                        def epi_candidates = []
+                        [
+                            [epi_ap, epi_ap_json, "AP"], [epi_pa, epi_pa_json, "PA"], [epi, epi_json, "NA"]
+                        ].each { group ->
+                            def nii_list = normalizeToList(group[0])
+                            def json_list = normalizeToList(group[1])
+                            nii_list.eachWithIndex { enii, eidx ->
+                                epi_candidates << [nii: enii, json: json_list[eidx], direction: group[2]]
+                            }
+                        }
+
+                        // ** Now matching them via the metadata ** //
+                        def sbref_match = []
+                        sbref_candidates.each { candidate ->
+                            def match = matchFilesToDWI(
+                                dwi_json_list[idx],
+                                nii,
+                                [:],
+                                null,
+                                candidate.json       // JSON file
+                            )
+
+                            if (match.matched) {
+                                sbref_match << [nii: candidate.nii, json: candidate.json]
+                            }
+                            match.warnings.each { w ->
+                                logs << "[${id}${ses ? "/" + ses : ""}${run_id ? '/run-' + run_id : ''}] WARN (sbref) ${w}"
+                            }
+                        }
+
+                        def epi_match = []
+                        epi_candidates.each { candidate ->
+                            def match = matchFilesToDWI(
+                                dwi_json_list[idx],
+                                nii,
+                                [:],
+                                null,
+                                candidate.json  // JSON file
+                            )
+
+                            if (match.matched) {
+                                epi_match << [nii: candidate.nii, json: candidate.json]
+                            }
+                            match.warnings.each { w ->
+                                logs << "[${id}${ses ? "/" + ses : ""}${run_id ? '/run-' + run_id : ''}] WARN (epi) ${w}"
+                            }
+                        }
+
+                        if (!sbref_match && !epi_match) {
+                            logs << "[${id}${ses ? "/" + ses : ""}${run_id ? '/run-' + run_id : ''}] No matching sbref or epi found for this DWI run."
+                        }
+
+                        // ** Organize by PE direction matching the PE of the main DWI file ** //
+                        def sbref_split = splitByPEDirection(sbref_match, dwi_json_list[idx])
+                        def epi_split = splitByPEDirection(epi_match, dwi_json_list[idx])
+
+                        files << [
+                            [id: id,
+                            session: ses ?: "",
+                            run: run_id,
+                            readout: readout,
+                            pe: pe,
+                            age: item.meta.age,
+                            sex: item.meta.sex ? (item.meta.sex.toString().trim().toLowerCase() in ['m', 'male', '1'] ? 1 : item.meta.sex.toString().trim().toLowerCase() in ['f', 'female', '2'] ? 2 : 1) : 1,
+                            handedness: item.meta.handedness ? (item.meta.handedness?.toLowerCase().contains("r") ? 1 : item.meta.handedness?.toLowerCase().contains("l") ? 2 : 1) : 1,
+                            disease: item.meta.disease ?: "HC",
+                            site: item.meta.site],
+                            t1w,
+                            wmparc,
+                            aparc_aseg,
+                            [nii, dwi_bval_list[idx], dwi_bvec_list[idx]],
+                            [],
+                            sbref_split?.same?.find()?.nii ?: epi_split?.same?.find()?.nii ?: [],
+                            sbref_split?.opposite?.find()?.nii ?: epi_split?.opposite?.find()?.nii ?: [],
+                            []
+                        ]
+                    }
+                }
+                else {
+                    // No DWI
+                    log.warn "No DWI found for this subject id: ${id} ${ses ? "and session: " + ses : ""}. Skipping."
+                }
+
+                // ** Save the logs into ${params.outdir}/pipeline_info/BIDS_logs.txt ** //
+                file("${params.outdir}/pipeline_info/BIDS_logs.txt") << logs.join("\n") + "\n"
+
+                // Add a check that b-values are within the params.dti_max_shell_value and params.fodf_min_shell_value, and if not, throw an error.
+                if ( files[0] != null && files[0][4] && !params.dti_shells && !params.fodf_shells && ( params.run_pft_tracking || params.run_local_tracking ) ) {
+
+                    def bvals = file(files[0][4][1]).text.trim().split(/\s+/).findAll { it -> it }.collect { it -> it as Double }.toSet()
+                        .findAll { it -> !(it >= 0 - params.b0_thr_extract_b0) || !(it <= 0 + params.b0_thr_extract_b0) }
+
+                    // Check if any values fits the threshold for DTI fitting (shells under the threshold)
+                    def belowDTI = bvals.findAll { it -> it <= params.dti_max_shell_value }
+                    if ( belowDTI.size() == 0) {
+                        error "ERROR: No b-values are below the dti_max_shell_value threshold of ${params.dti_max_shell_value} for subject ${id}. " +
+                            "Current protocol (excluding b0s) contains the following shells: ${bvals.join(', ')}. " +
+                            "Please check your acquisition protocol and provide the shells to use for DTI fitting using --dti_shells. " +
+                            "Alternatively, you can increase this threshold using --dti_max_shell_value."
+                    }
+
+                    // Check if any values fits the threshold for fODF fitting (shells over the threshold)
+                    def aboveFODF = bvals.findAll { it -> it >= params.fodf_min_shell_value }
+                    if ( aboveFODF.size() == 0) {
+                        error "ERROR: No b-values are above the fodf_min_shell_value threshold of ${params.fodf_min_shell_value} for subject ${id}. " +
+                            "Current protocol (excluding b0s) contains the following shells: ${bvals.join(', ')}. " +
+                            "Please check your acquisition protocol and provide the shells to use for fODF fitting using --fodf_shells. " +
+                            "Alternatively, you can decrease this threshold using --fodf_min_shell_value."
+                    }
+                }
+                return files
             }
         }
         else {
-            ch_samplesheet = channel
+            // samplesheet
+            log.info "Input ${input} is a samplesheet. Using nf-schema plugin to parse the samplesheet."
+            ch_inputs = channel
                 .fromList(samplesheetToList(input, "${projectDir}/assets/schema_input.json"))
                 .map{
                     meta, dwi, bval, bvec, sbref, rev_dwi, rev_bval, rev_bvec, rev_sbref, t1, wmparc, aparc_aseg, lesion ->
                         return [
                             meta,
-                            dwi,
-                            bval,
-                            bvec,
-                            sbref ?: [],
-                            rev_dwi ?: [],
-                            rev_bval ?: [],
-                            rev_bvec ?: [],
-                            rev_sbref ?: [],
                             t1,
                             wmparc ?: [],
                             aparc_aseg ?: [],
+                            [dwi, bval, bvec],
+                            rev_dwi ? [rev_dwi, rev_bval, rev_bvec] : [],
+                            sbref ?: [],
+                            rev_sbref ?: [],
                             lesion ?: []
                         ]
                 }
-                .map{ samplesheet ->
-                    validateInputSamplesheet(samplesheet)
-                }.multiMap{ meta, dwi, bval, bvec, sbref, rev_dwi, rev_bval, rev_bvec, rev_sbref, t1, wmparc, aparc_aseg, lesion ->
-                    t1: [meta, t1]
-                    wmparc: [meta, wmparc]
-                    aparc_aseg: [meta, aparc_aseg]
-                    dwi_bval_bvec: [meta, dwi, bval, bvec]
-                    b0: [meta, sbref]
-                    rev_dwi_bval_bvec: [meta, rev_dwi, rev_bval, rev_bvec]
-                    rev_b0: [meta, rev_sbref]
-                    lesion: [meta, lesion]
-                }
-
-            if (params.participants_tsv) {
-                participants_tsv_path = params.participants_tsv
-            } else {
-                participants_tsv_path = null
-                log.warn("No participants.tsv provided, covariates will not be used.")
-            }
         }
     }
-    else {
-        error "Please provide one input source: --input or --bids_config"
-    }
 
-    // We avoid merging the covariates (i.e. the extra meta fields)
-    // directly into the samplesheet's multimap meta fields, as those covariates are not used
-    // in most of the pipeline steps. This means, that if the participants.tsv changes for whatever
-    // reason, the entire cache of the pipeline would be invalidated, thus causing the
-    // pipeline to reprocess everything from scratch. Instead, we provide the mergeCovariatesIntoMeta
-    // function, which can be used to merge the covariates into the samplesheet's multimap
-    // on the fly, when needed (which should be done only when the inputs requires those fields).
-    ch_covariates = parseParticipantsTsv(participants_tsv_path, ch_samplesheet.t1)
-
-    def participants_to_include = []
-    def participants_to_exclude = []
-
-    if (params.participant_label) {
-        participants_to_include = params.participant_label.split(",").collect { item -> item.trim() }
-        log.info "Including participants: ${participants_to_include.join(", ")}"
-    }
-
-    if (params.exclude_participant_label) {
-        participants_to_exclude = params.exclude_participant_label.split(",").collect { item -> item.trim() }
-        log.info "Excluding participants: ${participants_to_exclude.join(", ")}"
-    }
-
-    if (participants_to_include || participants_to_exclude) {
-        ch_samplesheet = ch_samplesheet.collectEntries { key, value ->
-            def filtered = value.filter { item ->
-                def meta = item[0]
-
-                // The user can provide a list of subjects to include or to exclude, separated by commas
-                // in the same format as the prefix (i.e. sub-XX_ses-XX_run-XX). The implementation
-                // allows the user to provide a list of subjects of different scopes to run.
-                // For example, if the user provides:
-                // sub-01, then all sessions and runs of sub-01 will be processed.
-                // sub-01_ses-01, then all runs of sub-01_ses-01 will be processed.
-                // sub-01_ses-01_run-01, then only sub-01_ses-01_run-01 will be processed.
-
-                def sid = [meta.id].findAll { x -> x }.join("_")
-                def sid_ses = [meta.id, meta.session].findAll { x -> x }.join("_")
-                def sid_run = [meta.id, meta.session, meta.run].findAll { x -> x }.join("_")
-
-                def is_included = sid in participants_to_include ||
-                    sid_ses in participants_to_include ||
-                    sid_run in participants_to_include
-
-                def is_excluded = sid in participants_to_exclude ||
-                    sid_ses in participants_to_exclude ||
-                    sid_run in participants_to_exclude
-
-                // If inclusion list is provided, only keep the participant if in that list
-                // and not in the exclusion list.
-                if (participants_to_include) {
-                    return is_included && !is_excluded
-                }
-                // If we only have an exclusion list, filter out participants in that list
-                return !is_excluded
-            }
-
-            return [key, filtered]
-        }
-    }
+    ch_inputs.ifEmpty { error "ERROR: No valid input files found. Please check your input directory or samplesheet." }
 
     emit:
-    t1 = ch_samplesheet.t1
-    wmparc = ch_samplesheet.wmparc
-    aparc_aseg = ch_samplesheet.aparc_aseg
-    dwi_bval_bvec = ch_samplesheet.dwi_bval_bvec
-    b0 = ch_samplesheet.b0
-    rev_dwi_bval_bvec = ch_samplesheet.rev_dwi_bval_bvec
-    rev_b0 = ch_samplesheet.rev_b0
-    lesion = ch_samplesheet.lesion
-    covariates  = ch_covariates
-
-    versions    = ch_versions
+        inputs          = ch_inputs
+        versions        = ch_versions
 }
 
 
-def parseParticipantsTsv(participants_path, ch_with_proper_meta) {
-
-    if (participants_path == null) {
-        return channel.empty()
-    }
-
-    // Define the schema for participants.tsv
-    def tsv_file = file(participants_path)
-    def all_tsv_headers = tsv_file.readLines()[0].split('\t')
-        .collect { item -> item.trim() }
-        .toList()
-
-    // Create joining keys
-    def primary_keys = ['participant_id', 'session', 'run']
-    def content_keys = all_tsv_headers - primary_keys
-    def default_content = content_keys.collectEntries { key -> [key, ""] }
-
-    // Parse "${params.inputs}/participants.tsv"
-    def ch_participants = channel.fromPath(tsv_file)
-    def participants_content = ch_participants
-        .splitCsv(header: true, sep: '\t')
-        .map { row ->
-            def id = row.participant_id
-            def ses = row.session ? "ses-" + row.session: ""
-            def run = row.run ? "run-" + row.run: ""
-
-            def key = [id: id, session: ses, run: run]
-            def content = default_content.clone()
-            content_keys.each { ckey -> content[ckey] = row[ckey] }
-            content = content.collectEntries { k, v -> [k.toLowerCase(), v] }
-            return [key, content]
-        }
-
-    // Prepare keys
-    def ch_original_meta = ch_with_proper_meta
-        .map { meta, _content ->
-            def key = [id: meta.id, session: meta.session ?: "", run: meta.run ?: ""]
-            return [key, meta]
-        }
-
-    // Join with participants.tsv content
-    def ch_covariates = ch_original_meta
-        .join(participants_content, by: 0, remainder: true)
-        .filter { _key, original_meta, _tsv_meta -> original_meta != null } // Remove unmatched entries from the participants.tsv
-        .map { _key, original_meta, tsv_meta ->
-            def extra_meta = tsv_meta ?: default_content.collectEntries { k, v -> [k.toLowerCase(), v] }
-            return [original_meta, extra_meta]
-        }
-
-    return ch_covariates
-}
-
-def mergeCovariatesIntoMeta(ch_src, ch_covariates) {
-    if (params.participants_tsv == null && !file(params.input).isDirectory()) {
-        // The input is a samplesheet and no participants.tsv was provided.
-        // So there are no covariates to parse.
-        return ch_src
-    }
-
-    // Be careful on modifying the following lines, since there are 4 cases to handle.
-    // 1- If there's no covariates to add to the meta field.
-    // 2- Some subjects in the ch_src might not have a match in the participants.tsv,
-    //    so they won't have covariates to merge.
-    // 3- Some subjects in the participants.tsv might not have a match in the ch_src,
-    //    so they won't be merged at all (and that's fine since they don't have any
-    //    data to process in the pipeline).
-    // 4- For the subjects that have a match in the participants.tsv, we want to merge
-    //    the covariates into the meta field without overwriting any existing fields
-    //    in the meta (in case of any naming conflict, the original meta field takes
-    //    precedence over the participants.tsv content).
-    def ch = ch_src.join(ch_covariates, by: 0, remainder: true)
-        .map { item ->
-            def original_meta = item[0]
-            def content = item[1..-2]
-            def covariates = item[-1]
-
-            if ( !covariates ) {
-                // No covariates to merge
-                return [original_meta] + content
-            }
-            // Merge original meta with covariates without overwriting existing fields
-            def merged_meta = original_meta.clone()
-            covariates.each { k, v ->
-                if (merged_meta[k] == null || merged_meta[k] == "") {
-                    merged_meta[k] = v
-                }
-            }
-            return [merged_meta] + content
-        }
-        // We need to filter out the entries from the
-        // participants.tsv that don't have a match in the ch_src.
-        // Required since the remainder join will keep all unmatched
-        // entries from the participants.tsv.
-        .filter { item -> item[0] != null && item[1] != null }
-    return ch
-}
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     SUBWORKFLOW FOR PIPELINE COMPLETION
@@ -455,76 +570,252 @@ workflow PIPELINE_COMPLETION {
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+
+//
+// Function to format a list from null, string, or list.
+//
+def normalizeToList(value) {
+    if (value == null) return []
+    if (value instanceof List) return value
+    return [value]
+}
+
+//
+// Function to extract run number from a BIDS filename.
+//
+def extractRunFromFilename(filepath) {
+    def filename = filepath instanceof Path ? filepath.name : filepath.toString().split('/')[-1]
+    def matcher = (filename =~ /run-([a-zA-Z0-9]+)/)
+    return matcher ? matcher[0][1] : null
+}
+//
+// Function to find the matching reverse file in the case of DWI AP/PA
+//
+def findMatchingReverseFile(primaryFile, List reverseList) {
+    if (!reverseList) return null
+
+    def primaryRun = extractRunFromFilename(primaryFile)
+
+    // 1. match by run entity first
+    if (primaryRun) {
+        def match = reverseList.findIndexOf { rev ->
+            extractRunFromFilename(rev) == primaryRun
+        }
+        if (match >= 0) return match
+    }
+
+    // 2. If reverse has only one file, use it
+    if (reverseList.size() == 1) return 0
+
+    // 3. nothing to match at this point
+    return null
+}
+
+//
+// Function to assess whether phase encoding direction are opposite for a pair of JSON sidecar files
+//
+def areOppositePhaseEncoding(Map results, Map json1, Map json2) {
+    def pe1 = json1?.PhaseEncodingDirection
+    def pe2 = json2?.PhaseEncodingDirection
+
+    if (!pe1 || !pe2) {
+        results.warnings << "Missing PhaseEncodingDirection in one of the JSON sidecar files. Cannot determine if they are opposite."
+        results.matched = false
+        return results
+    }
+
+    // ** Currently only support j/j- pair ** //
+    def axis1 = pe1.replaceAll("-", "")
+    def axis2 = pe2.replaceAll("-", "")
+    if (axis1 != axis2) {
+        results.warnings << "PhaseEncodingDirection axes do not match: ${pe1} vs ${pe2}. Cannot determine if they are opposite."
+        results.matched = false
+    }
+
+    def neg1 = pe1.contains("-")
+    def neg2 = pe2.contains("-")
+    results.matched = (neg1 != neg2) ? true : false
+
+    // ** Convert j/j- into y/y- for clarity ** //
+    def axisMap = [j: "y"]
+    results.pe = axisMap[axis1]
+    if (results.pe == null) {
+        results.warnings << "PhaseEncodingDirection axes are not j/j- pair: ${pe1} vs ${pe2}. Cannot determine if they are opposite."
+        results.matched = false
+    }
+
+    return results
+}
+
+//
+// Function to match sbref and epi files to DWI
+//
+def matchFilesToDWI(Map dwiJson, dwiFilename, Map revJson, revFilename, Map assocJson) {
+    def result = [matched: false, warnings: []]
+
+    def dwiName = (dwiFilename instanceof Path ? dwiFilename.name :
+                    dwiFilename.toString().split('/')[-1])
+    def revName = revFilename?.with {
+        it instanceof Path ? it.name : it.toString().split('/')[-1]}
+
+    // Trying to find a match between B0FieldSource and B0FieldIdentifier
+    def dwiFieldSource = dwiJson?.B0FieldSource
+    def assocFieldId = assocJson?.B0FieldIdentifier
+
+    if (dwiFieldSource && assocFieldId) {
+        if (normalizeToList(dwiFieldSource).intersect(normalizeToList(assocFieldId))) {
+            result.matched = true
+        } else {
+            result.warnings << "B0FieldSource and B0FieldIdentifier do not match: ${dwiFieldSource} vs ${assocFieldId}. Cannot determine if they are opposite."
+            return result
+        }
+    }
+
+    // Checking the reverse association in case it happens
+    def dwiFieldId = dwiJson?.B0FieldIdentifier
+    def assocFieldSource = assocJson?.B0FieldSource
+
+    if (dwiFieldId && assocFieldSource) {
+        if (normalizeToList(dwiFieldId).intersect(normalizeToList(assocFieldSource))) {
+            result.matched = true
+        } else {
+            result.warnings << "B0FieldIdentifier and B0FieldSource do not match: ${dwiFieldId} vs ${assocFieldSource}. Cannot determine if they are opposite."
+            return result
+        }
+    }
+
+    // Check in the reverse DWI file, if present, for B0FieldSource and B0FieldIdentifier
+    if (revJson) {
+        def revFieldSource = revJson?.B0FieldSource
+        def revFieldId = revJson?.B0FieldIdentifier
+
+        if (revFieldSource && assocFieldId) {
+            if (normalizeToList(revFieldSource).intersect(normalizeToList(assocFieldId))) {
+                result.matched = true
+            } else {
+                result.warnings << "Reverse B0FieldSource and B0FieldIdentifier do not match: ${revFieldSource} vs ${assocFieldId}. Cannot determine if they are opposite."
+                return result
+            }
+        }
+
+        if (revFieldId && assocFieldSource) {
+            if (normalizeToList(revFieldId).intersect(normalizeToList(assocFieldSource))) {
+                result.matched = true
+            } else {
+                result.warnings << "Reverse B0FieldIdentifier and B0FieldSource do not match: ${revFieldId} vs ${assocFieldSource}. Cannot determine if they are opposite."
+                return result
+            }
+        }
+    }
+
+    // If no B0Field* are present, check for IntendedFor
+    def intendedFor = assocJson?.IntendedFor
+    if (intendedFor) {
+        def matches = normalizeToList(intendedFor).any { target ->
+            def targetName = target.toString().replaceAll("^bids::", "").split('/')[-1]
+            targetName == dwiName || targetName == revName
+        }
+
+        if ( matches ) {
+            result.matched = true
+        } else {
+            return result
+        }
+    }
+    return result
+}
+
+
+//
+// Function sort if matched sbref/epi files are the same direction as the main DWI or not.
+//
+def splitByPEDirection(List matches, Map dwiJson) {
+    def dwiPE = dwiJson?.PhaseEncodingDirection
+    def samePE = []
+    def oppositePE = []
+
+    matches.each { m ->
+        def assocPE = m.json?.PhaseEncodingDirection
+        if (!dwiPE || !assocPE) {
+            // Can't determine, so put in oppositePE for safety
+            oppositePE << m
+        } else if (arePEDirectionOpposite(dwiPE, assocPE)) {
+            oppositePE << m
+        } else {
+            samePE << m
+        }
+    }
+    return [same: samePE, opposite: oppositePE]
+}
+
+//
+// Small function to check if two PE strings are in the opposite direction
+//
+def arePEDirectionOpposite(String pe1, String pe2) {
+    def axis1 = pe1.replaceAll("-", "")
+    def axis2 = pe2.replaceAll("-", "")
+    if (axis1 != axis2) return false
+    return pe1.contains("-") != pe2.contains("-")
+}
+
+//
+// Get file from derivatives freesurfer
+//
+def getFreeSurferParcellations(fs_dir, id, ses=null) {
+
+    def fs_log = []
+
+    if (!fs_dir) {
+        fs_log << "fs_dir is null"
+        return [null, null, fs_log]
+    }
+
+    def fs_path = file(fs_dir)
+
+    // Candidate FreeSurfer subject directory names
+    def candidates = []
+
+    if (ses) {
+        candidates << "${id}_${ses}"
+    }
+
+    candidates << "${id}"
+    fs_log << "Candidates: ${candidates}\n"
+
+    // fs_dir points to a SUBJECTS_DIR containing all Freesurfer subjects
+    fs_log << "Looking for FreeSurfer subject directory in: ${fs_path}"
+    def subject_dir = candidates
+        .collect { it -> file("${fs_path}/${it}") }
+        .find { it -> it.exists() }
+
+    if (subject_dir) {
+        fs_log << "Found FreeSurfer subject directory: ${subject_dir}"
+    }
+    else {
+        fs_log << "No Freesurfer subject directory found in: ${fs_path}"
+    }
+
+    if (!subject_dir) {
+        return [null, null, fs_log]
+    }
+
+    def aparc_aseg = file("${subject_dir}/mri/aparc+aseg.mgz")
+    def wmparc = file("${subject_dir}/mri/wmparc.mgz")
+    fs_log << "aparc+aseg.mgz exists: ${aparc_aseg.exists()}"
+    fs_log << "wmparc.mgz exists: ${wmparc.exists()}"
+
+    return [
+        aparc_aseg.exists() ? aparc_aseg : null,
+        wmparc.exists() ? wmparc : null,
+        fs_log
+    ]
+}
+
 //
 // Validate channels from input samplesheet
 //
 def validateInputSamplesheet(input) {
     return input
-}
-
-//
-// Parse subjects from a BIDS JSON configuration file.
-//
-def parseBidsConfig(config_path) {
-    def config_file = file(config_path)
-
-    if (!config_file.exists()) {
-        error "BIDS config file does not exist: ${config_path}"
-    }
-
-    def config = new groovy.json.JsonSlurper().parseText(config_file.text)
-
-    if (!(config instanceof List)) {
-        error "BIDS config must be a JSON array of subject objects"
-    }
-
-    return config.collect { sample ->
-        if (!sample.subject) {
-            error "Each entry in bids_config must define 'subject'"
-        }
-        if (!sample.dwi || !sample.bval || !sample.bvec || !sample.t1) {
-            error "Each entry in bids_config must define required fields: dwi, bval, bvec, t1"
-        }
-
-        def subject_raw = sample.subject.toString()
-        def session_raw = sample.session != null ? sample.session.toString() : ""
-        def run_raw = (sample.containsKey('run') && sample.run != null) ? sample.run.toString() : ""
-
-        def subject_id = subject_raw.startsWith("sub-") ? subject_raw : "sub-${subject_raw}"
-        def session_id = session_raw ? (session_raw.startsWith("ses-") ? session_raw : "ses-${session_raw}") : ""
-
-        // Match IO_BIDS behavior: run "0" in TractoFlow configs is treated as unset.
-        def run_id = ""
-        if (run_raw && run_raw != "0" && run_raw != "run-0") {
-            run_id = run_raw.startsWith("run-") ? run_raw : "run-${run_raw}"
-        }
-
-        // Keep a minimal, normalized metadata shape consistent with IO_BIDS.
-        def meta = [
-            id          : subject_id,
-            session     : session_id,
-            run         : run_id,
-            dwi_tr      : sample.TotalReadoutTime,
-            dwi_phase   : sample.DWIPhaseEncodingDir,
-            dwi_revphase: sample.rev_DWIPhaseEncodingDir
-        ]
-
-        return [
-            meta,
-            sample.dwi,
-            sample.bval,
-            sample.bvec,
-            sample.topup ?: null,
-            sample.rev_dwi ?: null,
-            sample.rev_bval ?: null,
-            sample.rev_bvec ?: null,
-            sample.rev_topup ?: null,
-            sample.t1,
-            sample.wmparc ?: null,
-            sample.aparc_aseg ?: null,
-            sample.lesion ?: null
-        ]
-    }
 }
 
 //

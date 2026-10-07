@@ -98,6 +98,12 @@ args:
       type: float
       description: "Distance between control points for B-spline SyN."
       default: 26
+  - suffix:
+      type: string
+      description: |
+        Obligatory suffix to add to the output file name to prevent overwrite
+        of input files. e.g. : the suffix `warped` will result in the name `image_warped.nii.gz`.
+      default: "warped"
   - run_qc:
       type: boolean
       description: "Run quality control (QC) to generate a MultiQC report."
@@ -145,9 +151,16 @@ input:
         mandatory: true
         ontologies:
           - edam: http://edamontology.org/format_4001 # NIFTI format
-    - mask:
+    - fixed_mask:
         type: file
         description: Mask(s) for the fixed image space
+        pattern: "*.{nii,nii.gz}"
+        mandatory: false
+        ontologies:
+          - edam: http://edamontology.org/format_4001 # NIFTI format
+    - moving_mask:
+        type: file
+        description: Mask(s) for the moving image space
         pattern: "*.{nii,nii.gz}"
         mandatory: false
         ontologies:

@@ -40,7 +40,7 @@
             "nf-test": "0.9.3",
             "nextflow": "25.10.2"
         },
-        "timestamp": "2026-02-26T22:41:47.973024573"
+        "timestamp": "2026-06-02T20:47:31.389116538"
     },
     "atlas_roimetrics - IIT atlas - binary": {
         "content": [
@@ -84,6 +84,6 @@
             "nf-test": "0.9.3",
             "nextflow": "25.10.2"
         },
-        "timestamp": "2026-02-26T22:41:32.399271551"
+        "timestamp": "2026-06-02T20:47:03.44657253"
     }
 }

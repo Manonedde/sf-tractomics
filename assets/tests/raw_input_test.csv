@@ -1,2 +1,2 @@
-subject,dwi,bval,bvec,sbref,rev_dwi,rev_bval,rev_bvec,rev_sbref,t1,wmparc,aparc_aseg
-sub-test-1,https://scil.usherbrooke.ca/scil_test_data/sf-tractomics/dwi.nii.gz,https://scil.usherbrooke.ca/scil_test_data/sf-tractomics/dwi.bval,https://scil.usherbrooke.ca/scil_test_data/sf-tractomics/dwi.bvec,https://scil.usherbrooke.ca/scil_test_data/sf-tractomics/sbref.nii.gz,,,,,https://scil.usherbrooke.ca/scil_test_data/sf-tractomics/t1.nii.gz,,,,
+subject,ses,run,age,sex,handedness,disease,site,readout,pe,dwi,bval,bvec,sbref,rev_dwi,rev_bval,rev_bvec,rev_sbref,t1,wmparc,aparc_aseg
+sub-test,,,,,,,,,,https://scil.usherbrooke.ca/scil_test_data/sf-tractomics/dwi.nii.gz,https://scil.usherbrooke.ca/scil_test_data/sf-tractomics/dwi.bval,https://scil.usherbrooke.ca/scil_test_data/sf-tractomics/dwi.bvec,https://scil.usherbrooke.ca/scil_test_data/sf-tractomics/sbref.nii.gz,,,,,https://scil.usherbrooke.ca/scil_test_data/sf-tractomics/t1.nii.gz,,,,

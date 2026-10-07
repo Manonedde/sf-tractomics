@@ -28,32 +28,16 @@ include { PIPELINE_COMPLETION     } from './subworkflows/local/utils_nfcore_sf-t
 workflow SCILUS_SF_TRACTOMICS {
 
     take:
-    t1                  // channel: t1 read in from --input
-    wmparc              // channel: wmparc read in from --input
-    aparc_aseg          // channel: aparc_aseg read in from --input
-    dwi_bval_bvec       // channel: dwi_bval_bvec read in from --input
-    b0                  // channel: b0 read in from --input
-    rev_dwi_bval_bvec   // channel: rev_dwi_bval_bvec read in from --input
-    rev_b0              // channel: rev_b0 read in from --input
-    lesion              // channel: lesion read in from --input
-    covariates          // channel: covariates parsed from participants.tsv
+    ch_inputs
 
     main:
-
     //
     // WORKFLOW: Run pipeline
     //
     SF_TRACTOMICS (
-        t1,
-        wmparc,
-        aparc_aseg,
-        dwi_bval_bvec,
-        b0,
-        rev_dwi_bval_bvec,
-        rev_b0,
-        lesion,
-        covariates
+        ch_inputs
     )
+
     emit:
     multiqc_report = SF_TRACTOMICS.out.multiqc_report // channel: /path/to/multiqc_report.html
 }
@@ -75,7 +59,7 @@ workflow {
         args,
         params.outdir,
         params.input,
-        params.bids_config,
+        params.fs,
         params.help,
         params.help_full,
         params.show_hidden
@@ -85,15 +69,7 @@ workflow {
     // WORKFLOW: Run main workflow
     //
     SCILUS_SF_TRACTOMICS (
-        PIPELINE_INITIALISATION.out.t1,
-        PIPELINE_INITIALISATION.out.wmparc,
-        PIPELINE_INITIALISATION.out.aparc_aseg,
-        PIPELINE_INITIALISATION.out.dwi_bval_bvec,
-        PIPELINE_INITIALISATION.out.b0,
-        PIPELINE_INITIALISATION.out.rev_dwi_bval_bvec,
-        PIPELINE_INITIALISATION.out.rev_b0,
-        PIPELINE_INITIALISATION.out.lesion,
-        PIPELINE_INITIALISATION.out.covariates
+        PIPELINE_INITIALISATION.out.inputs
     )
     //
     // SUBWORKFLOW: Run completion tasks

@@ -202,8 +202,8 @@
                             "id": "test"
                         },
                         "test_dwi_resampled.nii.gz",
-                        "test__dwi_eddy_corrected.bval",
-                        "test__dwi_eddy_corrected.bvec"
+                        "test_copy_dwi.bval",
+                        "test_copy_dwi.bvec"
                     ]
                 ],
                 "fiber_response": [
@@ -441,7 +441,7 @@
             "nf-test": "0.9.3",
             "nextflow": "25.10.2"
         },
-        "timestamp": "2026-04-28T10:38:47.320094832"
+        "timestamp": "2026-06-03T15:18:39.539666595"
     },
     "tractoflow - no rev": {
         "content": [
@@ -646,8 +646,8 @@
                             "id": "test"
                         },
                         "test_dwi_resampled.nii.gz",
-                        "test__dwi_eddy_corrected.bval",
-                        "test__dwi_eddy_corrected.bvec"
+                        "test_copy_dwi.bval",
+                        "test_copy_dwi.bvec"
                     ]
                 ],
                 "fiber_response": [
@@ -941,6 +941,6 @@
             "nf-test": "0.9.3",
             "nextflow": "25.10.2"
         },
-        "timestamp": "2026-02-26T22:57:18.393937215"
+        "timestamp": "2026-06-03T15:16:19.494671141"
     }
 }
