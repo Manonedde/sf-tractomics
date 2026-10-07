@@ -52,11 +52,11 @@ jobs:
           apptainer-version: 1.3.6
 
       - name: Install Nextflow
-        uses: nf-core/setup-nextflow@v2
+        uses: nf-core/setup-nextflow@v3.0.0
         with:
           version: "${{ env.NXF_VER }}"
 
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           architecture: "x64"
