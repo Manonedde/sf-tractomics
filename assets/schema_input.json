@@ -254,7 +254,7 @@
                         "mimetype": "application/gzip"
                     }
                 ],
-                "errorMessage": "Lesion mask or map in Nifti format, cannot contain spaces and must have extension '.nii' or '.nii.gz'"
+                "errorMessage": "Lesion mask in T1w space in Nifti format, cannot contain spaces and must have extension '.nii' or '.nii.gz'"
             }
         },
         "required": ["subject", "dwi", "bval", "bvec", "t1"]

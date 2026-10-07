@@ -211,12 +211,21 @@ workflow PIPELINE_INITIALISATION {
 
                 // Lesion mask: a precomputed *_lesion_mask.nii.gz found under the
                 // BIDS derivatives/ tree. nf-bids gives every *_mask file (brain masks,
-                // etc.), so keep only the lesion masks here.
-                def lesion_mask = normalizeToList(item.lesion_mask?.nii)
+                // etc.), so keep only the lesion masks here. Masks with the space-T1w
+                // entity are already in T1w space, masks without a space entity are in
+                // FLAIR space, and masks in any other space (e.g. the space-DWI output of
+                // a previous run) are ignored.
+                def all_lesion_masks = normalizeToList(item.lesion_mask?.nii)
                     .findAll { f -> isDerivative(f) && f.toString().endsWith("_lesion_mask.nii.gz") }
-                if ( lesion_mask.size() > 1 ) {
-                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple derivatives lesion masks found. Using the last one for processing: ${lesion_mask[-1]}"
+                def lesion_mask_t1 = all_lesion_masks.findAll { f -> file(f).name.contains("_space-T1w_") }
+                def lesion_mask = all_lesion_masks.findAll { f -> !file(f).name.contains("_space-") }
+                if ( lesion_mask_t1.size() > 1 ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple derivatives T1w-space lesion masks found. Using the last one for processing: ${lesion_mask_t1[-1]}"
                 }
+                if ( lesion_mask.size() > 1 ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Multiple derivatives FLAIR-space lesion masks found. Using the last one for processing: ${lesion_mask[-1]}"
+                }
+                lesion_mask_t1 = lesion_mask_t1 ? lesion_mask_t1[-1] : []
                 lesion_mask = lesion_mask ? lesion_mask[-1] : []
 
                 // Raw FLAIR acquisition, used as SEGMENTATION_LSTAI input (together with
@@ -228,8 +237,11 @@ workflow PIPELINE_INITIALISATION {
                 }
                 flair = flair ? flair[-1] : []
 
-                if ( lesion_mask ) {
-                    logs << "[${id}${ses ? "/" + ses : ""}] Using precomputed lesion mask: ${lesion_mask}"
+                if ( lesion_mask_t1 ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Using precomputed T1w-space lesion mask: ${lesion_mask_t1}"
+                }
+                else if ( lesion_mask ) {
+                    logs << "[${id}${ses ? "/" + ses : ""}] Using precomputed FLAIR-space lesion mask: ${lesion_mask}"
                 }
                 else if ( flair ) {
                     logs << "[${id}${ses ? "/" + ses : ""}] No precomputed lesion mask, lesions will be segmented with LST-AI from: ${flair}"
@@ -377,7 +389,8 @@ workflow PIPELINE_INITIALISATION {
                             sbref_split?.same?.find()?.nii ?: epi_split?.same?.find()?.nii ?: [],
                             sbref_split?.opposite?.find()?.nii ?: epi_split?.opposite?.find()?.nii ?: [],
                             lesion_mask,
-                            flair
+                            flair,
+                            lesion_mask_t1
                         ]
                     }
                 }
@@ -481,7 +494,8 @@ workflow PIPELINE_INITIALISATION {
                             sbref_split?.same?.find()?.nii ?: epi_split?.same?.find()?.nii ?: [],
                             sbref_split?.opposite?.find()?.nii ?: epi_split?.opposite?.find()?.nii ?: [],
                             lesion_mask,
-                            flair
+                            flair,
+                            lesion_mask_t1
                         ]
                     }
                 }
@@ -523,10 +537,10 @@ workflow PIPELINE_INITIALISATION {
         else {
             // samplesheet
             log.info "Input ${input} is a samplesheet. Using nf-schema plugin to parse the samplesheet."
-            // Note: the samplesheet schema has no FLAIR column, so a "flair" placeholder
-            // of [] is emitted to keep this tuple's shape aligned with the BIDS-directory
-            // branch above. This means SEGMENTATION_LSTAI never triggers for samplesheet
-            // input; a lesion mask can only come from the samplesheet's own "lesion" column.
+            // Note: the samplesheet schema has no FLAIR column, so the FLAIR-space lesion
+            // mask and FLAIR slots are [] to keep this tuple's shape aligned with the
+            // BIDS-directory branch above. SEGMENTATION_LSTAI never triggers for samplesheet
+            // input; the samplesheet "lesion" column is a lesion mask in T1w space.
             ch_inputs = channel
                 .fromList(samplesheetToList(input, "${projectDir}/assets/schema_input.json"))
                 .map{
@@ -540,8 +554,9 @@ workflow PIPELINE_INITIALISATION {
                             rev_dwi ? [rev_dwi, rev_bval, rev_bvec] : [],
                             sbref ?: [],
                             rev_sbref ?: [],
-                            lesion ?: [],
-                            []
+                            [],
+                            [],
+                            lesion ?: []
                         ]
                 }
         }

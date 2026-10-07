@@ -40,7 +40,7 @@ workflow SF_TRACTOMICS {
     main:
 
     ch_inputs = ch_inputs
-        .multiMap{ meta, t1, wmparc, aparcaseg, dwi_bval_bvec, rev_dwi_bval_bvec, b0, rev_b0, lesion_mask, flair ->
+        .multiMap{ meta, t1, wmparc, aparcaseg, dwi_bval_bvec, rev_dwi_bval_bvec, b0, rev_b0, lesion_mask, flair, lesion_mask_t1 ->
             meta: meta
             t1: [meta, t1]
             wmparc: [meta, wmparc]
@@ -51,6 +51,7 @@ workflow SF_TRACTOMICS {
             rev_b0: [meta, rev_b0]
             lesion_mask: [meta, lesion_mask]
             flair: [meta, flair]
+            lesion_mask_t1: [meta, lesion_mask_t1]
         }
 
     if ( params.harmonization_reference ) {
@@ -100,15 +101,23 @@ workflow SF_TRACTOMICS {
     }
 
     //
+    // Lesion mask priority: precomputed in T1w space > precomputed in FLAIR space
+    // > generated with LST-AI from the FLAIR. A T1w-space mask skips both LST-AI
+    // and the FLAIR->T1w registration.
+    ch_lesion_mask = ch_inputs.lesion_mask
+        .join(ch_inputs.lesion_mask_t1)
+        .map{ meta, mask, mask_t1 -> [meta, mask_t1 ? [] : mask] }
+
+    //
     // Generate a lesion mask with LST-AI for subjects/sessions that have a FLAIR
     // acquisition but no precomputed lesion mask.
-    ch_lesion_mask = ch_inputs.lesion_mask
     if ( params.run_lst_ai_lesion_segmentation ) {
         ch_lstai_input = ch_inputs.lesion_mask
-            .filter{ _meta, mask -> !mask }
+            .join(ch_inputs.lesion_mask_t1)
+            .filter{ _meta, mask, mask_t1 -> !mask && !mask_t1 }
             .join(ch_inputs.flair.filter{ _meta, flair -> flair })
             .join(ch_inputs.t1)
-            .map{ meta, _empty_mask, flair, t1 -> [meta, t1, flair] }
+            .map{ meta, _empty_mask, _empty_mask_t1, flair, t1 -> [meta, t1, flair] }
 
         SEGMENTATION_LSTAI(ch_lstai_input)
         ch_versions = ch_versions.mix(SEGMENTATION_LSTAI.out.versions)
@@ -116,7 +125,7 @@ workflow SF_TRACTOMICS {
 
         // Use the precomputed mask when one exists; otherwise use the mask
         // SEGMENTATION_LSTAI generated
-        ch_lesion_mask = ch_inputs.lesion_mask
+        ch_lesion_mask = ch_lesion_mask
             .join(SEGMENTATION_LSTAI.out.lesion_mask, remainder: true)
             .map{ meta, precomputed, generated -> [meta, precomputed ?: (generated ?: [])] }
     }
@@ -153,14 +162,16 @@ workflow SF_TRACTOMICS {
     )
     ch_versions = ch_versions.mix(TRANSFORM_LESION_MASK_TO_T1.out.versions)
 
-    // Replace with the T1w-space warp where one was computed. 
+    // Replace with the T1w-space warp where one was computed, and use the
+    // precomputed T1w-space mask as-is when one exists.
     ch_lesion_mask = ch_lesion_mask
         .join(TRANSFORM_LESION_MASK_TO_T1.out.warped_image, remainder: true)
-        .map{ meta, original, warped ->
+        .join(ch_inputs.lesion_mask_t1)
+        .map{ meta, original, warped, mask_t1 ->
             if ( original && !warped ) {
-                log.warn "[${meta.id}${meta.session ? "/" + meta.session : ""}] Lesion mask found but no FLAIR acquisition to register it from T1w space; using it as-is, which may be misaligned once warped to diffusion space."
+                log.warn "[${meta.id}${meta.session ? "/" + meta.session : ""}] Lesion mask found but no FLAIR acquisition to register it to T1w space; using it as-is, which may be misaligned once warped to diffusion space. Name it *_space-T1w_lesion_mask.nii.gz if it is already in T1w space."
             }
-            [meta, warped ?: (original ?: [])]
+            [meta, mask_t1 ?: (warped ?: (original ?: []))]
         }
 
     TRACTOFLOW(

@@ -906,7 +906,7 @@
             "type": "object",
             "description": "Define the behaviour of the LST-AI lesion segmentation.",
             "default": "",
-            "help_text": "Define SEGMENTATION_LSTAI, which generates a white-matter lesion mask from a T1w/FLAIR pair for subjects/sessions when nf-bids did not find a precomputed lesion mask under the BIDS derivatives/ tree (see assets/nf-bids_config.yml).",
+            "help_text": "Lesion masks are looked up under the BIDS derivatives/ tree: `*_space-T1w_lesion_mask.nii.gz` (already in T1w space, used as-is) is used first, then `*_lesion_mask.nii.gz` (in FLAIR space, registered to the T1w). When none is found, SEGMENTATION_LSTAI generates a white-matter lesion mask from the T1w/FLAIR pair. The lesion mask is added to the WM tissue maps and to the PFT and local tracking seeding masks, and is published in diffusion space as `*_space-DWI_lesion_mask.nii.gz`. With a samplesheet, the `lesion` column is a lesion mask in T1w space.",
             "properties": {
                 "run_lst_ai_lesion_segmentation": {
                     "type": "boolean",
