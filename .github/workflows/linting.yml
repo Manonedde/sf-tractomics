@@ -8,7 +8,7 @@ on:
     types: [published]
 
 env:
-  NXF_VER: "25.04.6"
+  NXF_VER: "25.10.2"
 
 jobs:
   pre-commit:

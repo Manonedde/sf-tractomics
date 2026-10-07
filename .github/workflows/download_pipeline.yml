@@ -18,7 +18,7 @@ on:
 
 env:
   NXF_ANSI_LOG: false
-  NXF_VER: "25.04.6"
+  NXF_VER: "25.10.2"
 
 jobs:
   configure:
@@ -69,21 +69,6 @@ jobs:
       - name: Cleanup apptainer cache before pull
         run: |
           apptainer cache clean --force || true
-
-      - name: Pre-install Nextflow plugins
-        # nextflow inspect (called internally by nf-core pipelines download) does not
-        # auto-download plugins the way `nextflow run` does. Pre-warming the local plugin
-        # cache avoids the "does not exist in the repository" error at inspect time.
-        run: |
-          CONFIG_URL="https://raw.githubusercontent.com/${{ needs.configure.outputs.REPO_LOWERCASE }}/${{ needs.configure.outputs.REPO_BRANCH }}/nextflow.config"
-          echo "Fetching plugin list from ${CONFIG_URL}"
-          CONFIG=$(curl -fsSL "${CONFIG_URL}")
-          # Extract every plugin id + version declaration, e.g. id 'nf-bids@0.3.0'
-          PLUGINS=$(echo "${CONFIG}" | grep -oP "id\s+'[^@']+@\K[^']+" | xargs -I{} echo "{}" || true)
-          PLUGIN_NAMES=$(echo "${CONFIG}" | grep -oP "id\s+'\K[^@']+" | xargs -I{} echo "{}" || true)
-          paste <(echo "${PLUGIN_NAMES}") <(echo "${PLUGINS}") | while IFS=$'\t' read -r name ver; do
-            [ -n "$name" ] && [ -n "$ver" ] && echo "Installing ${name}@${ver}" && nextflow plugin install "${name}@${ver}"
-          done
 
       - name: Download the pipeline
         run: |
