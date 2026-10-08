@@ -116,12 +116,12 @@ workflow SF_TRACTOMICS {
             .map{ meta, fs_dir -> [meta, fs_dir.resolve("${fs_dir.name - ~/_fastsurfer$/}/mri")] }
 
         CONVERT_FASTSURFER_WMPARC(
-            ch_fastsurfer_mri.map{ meta, mri -> [meta, mri.resolve("wmparc.DKTatlas.mapped.mgz")] }
+            ch_fastsurfer_mri.map{ meta, mri -> [meta, mri.resolve("wmparc.mgz")] }
         )
         ch_versions = ch_versions.mix(CONVERT_FASTSURFER_WMPARC.out.versions)
 
         CONVERT_FASTSURFER_APARC_ASEG(
-            ch_fastsurfer_mri.map{ meta, mri -> [meta, mri.resolve("aparc.DKTatlas+aseg.mapped.mgz")] }
+            ch_fastsurfer_mri.map{ meta, mri -> [meta, mri.resolve("aparc+aseg.mgz")] }
         )
         ch_versions = ch_versions.mix(CONVERT_FASTSURFER_APARC_ASEG.out.versions)
 
