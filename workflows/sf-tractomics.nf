@@ -98,10 +98,7 @@ workflow SF_TRACTOMICS {
         ch_synthstrip_weights = channel.fromPath(params.synthstrip_weights, checkIfExists: true)
     }
 
-    //
-    // MODULE: Run FastSurfer on the raw T1 to produce wmparc and aparc+aseg.
-    // When enabled, these replace any wmparc/aparc_aseg given as input.
-    //
+    /* Run FastSurfer if requested */
     ch_wmparc = ch_inputs.wmparc
     ch_aparc_aseg = ch_inputs.aparcaseg
     if ( params.run_fastsurfer ) {
