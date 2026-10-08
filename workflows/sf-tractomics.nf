@@ -102,13 +102,15 @@ workflow SF_TRACTOMICS {
     // MODULE: Run FastSurfer on the raw T1 to produce wmparc and aparc+aseg.
     // When enabled, these replace any wmparc/aparc_aseg given as input.
     //
+    ch_wmparc = ch_inputs.wmparc
+    ch_aparc_aseg = ch_inputs.aparcaseg
     if ( params.run_fastsurfer ) {
         if ( !params.fs_license ) {
             error "A FreeSurfer license is required to run FastSurfer. Provide it with params.fs_license."
         }
 
         SEGMENTATION_FASTSURFER(
-            ch_t1.combine(channel.fromPath(params.fs_license, checkIfExists: true))
+            ch_inputs.t1.combine(channel.fromPath(params.fs_license, checkIfExists: true))
         )
         ch_versions = ch_versions.mix(SEGMENTATION_FASTSURFER.out.versions)
 
@@ -139,9 +141,9 @@ workflow SF_TRACTOMICS {
             .filter{ it -> it[1] },
         ch_inputs.rev_b0
             .filter{ it -> it[1] },
-        ch_inputs.wmparc
+        ch_wmparc
             .filter{ it -> it[1] },
-        ch_inputs.aparcaseg
+        ch_aparc_aseg
             .filter{ it -> it[1] },
         ch_topup_config,
         ch_bet_template,
