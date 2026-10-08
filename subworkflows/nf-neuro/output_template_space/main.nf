@@ -156,6 +156,7 @@ workflow OUTPUT_TEMPLATE_SPACE {
             ch_brain_mask,
             channel.empty(),
             channel.empty(),
+            channel.empty(),
             ch_freesurfer_license,
             [
                 "run_easyreg": options.run_easyreg,

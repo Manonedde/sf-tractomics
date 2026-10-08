@@ -26,7 +26,6 @@ include { REGISTRATION_ANTSAPPLYTRANSFORMS as REGISTRATION_METRICS_TO_ORIG } fro
 include { REGISTRATION_TRACTOGRAM as REGISTRATION_TRACTOGRAM_TO_ORIG } from '../modules/nf-neuro/registration/tractogram/main'
 include { OUTPUT_TEMPLATE_SPACE  } from '../subworkflows/nf-neuro/output_template_space/main'
 include { HARMONIZATION          } from '../subworkflows/nf-neuro/harmonization/main'
-include { mergeCovariatesIntoMeta } from '../subworkflows/local/utils_nfcore_sf-tractomics_pipeline/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -36,16 +35,30 @@ include { mergeCovariatesIntoMeta } from '../subworkflows/local/utils_nfcore_sf-
 
 workflow SF_TRACTOMICS {
     take:
-    ch_t1
-    ch_wmparc
-    ch_aparc_aseg
-    ch_dwi_bval_bvec
-    ch_b0
-    ch_rev_dwi_bval_bvec
-    ch_rev_b0
-    ch_lesion
-    ch_covariates
+        ch_inputs
+
     main:
+
+    ch_inputs = ch_inputs
+        .multiMap{ meta, t1, wmparc, aparcaseg, dwi_bval_bvec, rev_dwi_bval_bvec, b0, rev_b0, lesion ->
+            meta: meta
+            t1: [meta, t1]
+            wmparc: [meta, wmparc]
+            aparcaseg: [meta, aparcaseg]
+            dwi_bval_bvec: [meta, dwi_bval_bvec[0], dwi_bval_bvec[1], dwi_bval_bvec[2]]
+            rev_dwi_bval_bvec: [meta, rev_dwi_bval_bvec[0], rev_dwi_bval_bvec[1], rev_dwi_bval_bvec[2]]
+            b0: [meta, b0]
+            rev_b0: [meta, rev_b0]
+            lesion: [meta, lesion]
+        }
+
+    if ( params.harmonization_reference ) {
+        ch_inputs.meta
+            .collect()
+            .map { meta_list ->
+                validateMinimumParticipantsPerSite(meta_list)
+            }
+    }
 
     ch_versions = channel.empty()
     ch_sub_multiqc_files = channel.empty()
@@ -72,9 +85,9 @@ workflow SF_TRACTOMICS {
     /* Load bet template */
     template_directory = file(params.template_t1 ?: "$projectDir/assets/templates/mni_152_sym_09c/t1")
     if ( template_directory.exists() && template_directory.isDirectory() ){
-        ch_bet_template = ch_t1.map{ meta, _t1 ->  meta}
+        ch_bet_template = ch_inputs.t1.map{ meta, _t1 ->  meta}
             .combine(channel.fromPath(template_directory / "t1_template.nii.gz"))
-        ch_bet_probability = ch_t1.map{ meta, _t1 ->  meta }
+        ch_bet_probability = ch_inputs.t1.map{ meta, _t1 ->  meta }
             .combine(channel.fromPath(template_directory / "t1_brain_probability_map.nii.gz"))
     }
     else {
@@ -118,23 +131,23 @@ workflow SF_TRACTOMICS {
     }
 
     TRACTOFLOW(
-        ch_dwi_bval_bvec,
-        ch_t1,
-        ch_b0
+        ch_inputs.dwi_bval_bvec,
+        ch_inputs.t1,
+        ch_inputs.b0
             .filter{ it -> it[1] },
-        ch_rev_dwi_bval_bvec
+        ch_inputs.rev_dwi_bval_bvec
             .filter{ it -> it[1] },
-        ch_rev_b0
+        ch_inputs.rev_b0
             .filter{ it -> it[1] },
-        ch_wmparc
+        ch_inputs.wmparc
             .filter{ it -> it[1] },
-        ch_aparc_aseg
+        ch_inputs.aparcaseg
             .filter{ it -> it[1] },
         ch_topup_config,
         ch_bet_template,
         ch_bet_probability,
         ch_synthstrip_weights,
-        ch_lesion
+        ch_inputs.lesion
             .filter{ it -> it[1] },
         [
             "preproc_dwi_run_denoising": params.run_dwi_denoising,
@@ -282,8 +295,8 @@ workflow SF_TRACTOMICS {
 
     if ( params.run_atlas_roimetrics ) {
         ATLAS_ROIMETRICS(
-            mergeCovariatesIntoMeta(TRACTOFLOW.out.b0, ch_covariates),
-            mergeCovariatesIntoMeta(ch_input_metrics, ch_covariates),
+            TRACTOFLOW.out.b0,
+            ch_input_metrics,
             [
                 use_atlas_iit: params.use_atlas_iit,
                 use_binary_masks: params.use_binary_masks,
@@ -298,10 +311,8 @@ workflow SF_TRACTOMICS {
         // while keeping the header from the first
         // file only and skipping it in the rest.
         ch_collection_mean_input = ATLAS_ROIMETRICS.out.stats_tab_mean
-
         ch_collection_mean_input = collectStatsFiles(ch_collection_mean_input, "space-native_atlas-iit_label-mean_desc-roi_stats.tsv", "${params.outdir}/metrics/")
         ch_global_multiqc_files = ch_global_multiqc_files.mix(ch_collection_mean_input)
-
 
         if ( params.harmonization_reference ) {
             // The QC expects the harmonization reference to have the following pattern: *.reference.tsv
@@ -335,11 +346,11 @@ workflow SF_TRACTOMICS {
 
     if ( params.run_tractometry ) {
         TRACTOMETRY(
-            mergeCovariatesIntoMeta(ch_bundle_seg, ch_covariates),
+            ch_bundle_seg,
             channel.empty(),
-            mergeCovariatesIntoMeta(ch_input_metrics, ch_covariates),
+            ch_input_metrics,
             channel.empty(),
-            mergeCovariatesIntoMeta(TRACTOFLOW.out.fodf, ch_covariates))
+            TRACTOFLOW.out.fodf)
         ch_versions = ch_versions.mix(TRACTOMETRY.out.versions)
 
         ch_tractometry_mqc = TRACTOMETRY.out.mean_tsv
@@ -561,6 +572,32 @@ def collectStatsFiles(ch_stats_files, name, storeDir) {
 
             return output_file
         }
+}
+
+def validateMinimumParticipantsPerSite(meta_list) {
+    def participants_per_site = [:].withDefault { [] as Set }
+
+    meta_list.each { meta ->
+        def meta_site = meta.get('site')
+        def participant = meta.get('id')
+        if (meta_site && participant) {
+            participants_per_site[meta_site.toString().trim()].add(participant.toString().trim())
+        }
+    }
+
+    def sites_with_too_few_participants = [:]
+    participants_per_site.each { entry ->
+        if (entry.value.size() < 5) {
+            sites_with_too_few_participants[entry.key] = entry.value
+        }
+    }
+    if (sites_with_too_few_participants) {
+        def site_errors = []
+        sites_with_too_few_participants.each { entry ->
+            site_errors << "Site '${entry.key}' has ${entry.value.size()} participant(s); at least 5 are required."
+        }
+        error "Harmonization cannot continue:\n${site_errors.join('\n')}"
+    }
 }
 
 /*

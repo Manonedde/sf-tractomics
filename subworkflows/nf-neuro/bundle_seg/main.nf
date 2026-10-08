@@ -92,6 +92,7 @@ workflow BUNDLE_SEG {
             channel.empty(),
             channel.empty(),
             channel.empty(),
+            channel.empty(),
             ch_freesurfer_license,
             [
                 "run_easyreg": options.run_easyreg,

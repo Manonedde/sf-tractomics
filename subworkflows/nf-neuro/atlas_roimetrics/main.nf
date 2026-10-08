@@ -42,7 +42,7 @@ workflow ATLAS_ROIMETRICS {
         // Register atlas reference image to subject space
         ch_input_register_atlas = ch_subject_reference
             .combine(ch_template_ref)
-            .map{ meta, subject_ref, template_ref -> [meta, subject_ref, template_ref, []] }
+            .map{ meta, subject_ref, template_ref -> [meta, subject_ref, template_ref, [], []] }
         REGISTER_ATLAS_REF(ch_input_register_atlas)
         ch_versions = ch_versions.mix(REGISTER_ATLAS_REF.out.versions)
 

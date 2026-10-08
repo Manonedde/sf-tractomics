@@ -7,13 +7,74 @@
     "items": {
         "type": "object",
         "minProperties": 5,
-        "maxProperties": 13,
+        "maxProperties": 20,
         "properties": {
             "subject": {
                 "type": "string",
                 "pattern": "^\\S+$",
                 "errorMessage": "Subject identifier",
                 "meta": ["id"]
+            },
+            "ses": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "errorMessage": "Subject session identifier",
+                "meta": ["ses"],
+                "default": ""
+            },
+            "run": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "errorMessage": "Subject run identifier",
+                "meta": ["run"],
+                "default": ""
+            },
+            "age": {
+                "type": "number",
+                "errorMessage": "Subject age",
+                "meta": ["age"],
+                "default": 0.0
+            },
+            "sex": {
+                "type": "string",
+                "choices": ["M", "F", "O", "N"],
+                "errorMessage": "Subject sex",
+                "meta": ["sex"],
+                "default": "N"
+            },
+            "handedness": {
+                "type": "string",
+                "choices": ["left", "right", "ambidextrous"],
+                "errorMessage": "Subject handedness",
+                "meta": ["handedness"],
+                "default": ""
+            },
+            "disease": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "errorMessage": "Subject disease",
+                "meta": ["disease"],
+                "default": "HC"
+            },
+            "site": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "errorMessage": "Subject site",
+                "meta": ["site"],
+                "default": "NA"
+            },
+            "readout": {
+                "type": "number",
+                "errorMessage": "Subject readout time in seconds",
+                "meta": ["readout"],
+                "default": "0.062"
+            },
+            "pe": {
+                "type": "string",
+                "choices": ["j", "j-", "i", "i-"],
+                "errorMessage": "Subject phase encoding direction",
+                "meta": ["pe"],
+                "default": ""
             },
             "dwi": {
                 "type": "string",

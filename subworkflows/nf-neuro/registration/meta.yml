@@ -103,6 +103,19 @@ input:
             description: Fixed image mask file.
       pattern: "*.{nii,nii.gz}"
       mandatory: false
+  - ch_moving_mask:
+      type: file
+      description: |
+        FOR USE WITH ANTS SYN REGISTRATION ONLY. The input channel containing the mask file in moving image space.
+      structure:
+        - meta:
+            type: map
+            description: Metadata map.
+        - mask:
+            type: file
+            description: Moving image mask file.
+      pattern: "*.{nii,nii.gz}"
+      mandatory: false
   - ch_segmentation:
       type: file
       description: |

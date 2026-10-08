@@ -195,6 +195,7 @@ workflow TRACTOFLOW {
             channel.empty(),
             channel.empty(),
             channel.empty(),
+            channel.empty(),
             [
                 "run_easyreg": options.run_easyreg,
                 "run_synthmorph": options.run_synthmorph,
