@@ -312,7 +312,7 @@
                 "run_fastsurfer": {
                     "type": "boolean",
                     "description": "Run FastSurfer on the raw T1 to produce the wmparc and aparc+aseg used for tissue segmentation. (Requires FreeSurfer license)",
-                    "help_text": "Runs the full FastSurfer pipeline (segmentation + surface reconstruction) on the input T1. The resulting wmparc and aparc+aseg replace any wmparc/aparc_aseg provided as input. The complete FastSurfer output folder is saved in the subject's anat output directory.",
+                    "help_text": "Runs the full FastSurfer pipeline (segmentation + surface reconstruction) on the input T1. The resulting wmparc and aparc+aseg replace any wmparc/aparc_aseg provided as input. The complete FastSurfer output folder is saved in a fastsurfer directory alongside the output directory (<outdir>/../fastsurfer/<subject>[_<session>][_run-<run>]).",
                     "default": false
                 },
                 "fs_license": {
