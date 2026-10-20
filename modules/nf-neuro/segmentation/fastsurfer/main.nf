@@ -10,6 +10,7 @@ process SEGMENTATION_FASTSURFER {
 
     output:
         tuple val(meta), path("*_fastsurfer")       , emit: fastsurferdirectory
+        tuple val(meta), path("*_fastsurfer/*")     , emit: subjectdirectory
         path "versions.yml"                         , emit: versions
 
     when:
