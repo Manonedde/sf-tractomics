@@ -9,8 +9,7 @@ process SEGMENTATION_FASTSURFER {
         tuple val(meta), path(anat), path(fs_license)
 
     output:
-        tuple val(meta), path("*_fastsurfer")       , emit: fastsurferdirectory
-        tuple val(meta), path("*_fastsurfer/*")     , emit: subjectdirectory
+        tuple val(meta), path("fastsurfer/*")       , emit: fastsurferdirectory
         path "versions.yml"                         , emit: versions
 
     when:
@@ -24,12 +23,11 @@ process SEGMENTATION_FASTSURFER {
     def seg_only = task.ext.seg_only ? "--seg_only" : ""
     def nthreads = task.ext.single_thread ? 1 : task.cpus
     def FASTSURFER_HOME = "/fastsurfer"
-    def SUBJECTS_DIR = "${prefix}_fastsurfer"
+    def SUBJECTS_DIR = "."
 
     """
     export OMP_NUM_THREADS=${task.ext.single_thread ? 1 : task.cpus}
 
-    mkdir ${prefix}_fastsurfer/
     $FASTSURFER_HOME/run_fastsurfer.sh  --allow_root \
                                         --sd \$(realpath ${SUBJECTS_DIR}) \
                                         --fs_license \$(realpath $fs_license) \
@@ -63,13 +61,13 @@ process SEGMENTATION_FASTSURFER {
 
     $FASTSURFER_HOME/run_fastsurfer.sh --version
 
-    mkdir -p ${prefix}__fastsurfer/${prefix}/mri/transforms \
-        ${prefix}__fastsurfer/${prefix}/label/ \
-        ${prefix}__fastsurfer/${prefix}/surf/ \
-        ${prefix}__fastsurfer/${prefix}/stats/ \
-        ${prefix}__fastsurfer/${prefix}/scripts/ \
-        ${prefix}__fastsurfer/${prefix}/tmp/ \
-        ${prefix}__fastsurfer/${prefix}/touch/
+    mkdir -p fastsurfer/${prefix}/mri/transforms \
+        fastsurfer/${prefix}/label/ \
+        fastsurfer/${prefix}/surf/ \
+        fastsurfer/${prefix}/stats/ \
+        fastsurfer/${prefix}/scripts/ \
+        fastsurfer/${prefix}/tmp/ \
+        fastsurfer/${prefix}/touch/
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
