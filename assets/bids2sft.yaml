@@ -1,0 +1,196 @@
+# ============================================================================
+# nf-bids configuration for sf-tractomics with LST-AI lesion masks
+# Plugin version: nf-bids 0.1.0-beta.11
+#
+# DWI volumes are always collected as ordered lists (sequential_set / mixed_set)
+# so that multiple runs per subject/session are merged automatically.
+# Single-run subjects produce single-element lists — no special casing needed.
+#
+# Handles all DWI input combinations:
+#   - DWI without direction label (+ optional runs)
+#   - DWI dir-AP only               (+ optional runs)
+#   - DWI dir-AP + dir-PA           (+ optional runs per direction)
+#   - EPI field maps  (fmap/)       (+ optional runs per direction)
+#   - Single-band references (sbref)(+ optional runs per direction)
+#
+# T1w variants:
+#   - Standard T1w
+#   - MP2RAGE UNIT1 (uniform T1w image; preferred when T1w is absent)
+#
+# ── Lesion / pathology source (mutually exclusive) ───────────────────────────
+# Exactly ONE of the two sources below should be present per subject:
+#
+#   1. lesion | pre-computed mask (any origin: LST-AI, manual, GBM, WMH …)
+#              BIDS entity: seg-lesion  ("lesion" = any pathological tissue)
+#              Source/method encoded in desc-XX:
+#                desc-lstai  : LST-AI automatic output
+#                desc-manual : any manually drawn annotation
+#                desc-GBM    : glioblastoma-specific
+#                desc-WMH    : white matter hyperintensities
+#                desc-<X>    : any other method or pathology
+#   2. FLAIR  | raw FLAIR image; the pipeline runs automated segmentation
+#              on it when no pre-computed mask is available
+#
+# If BOTH a mask (lesion) AND a FLAIR image are present for the same subject,
+# the mask takes priority and FLAIR is ignored by the workflow.
+#
+# BIDS naming requirements:
+#   lesion : sub-XX[_ses-XX]_desc-<method>_seg-lesion_dseg.nii.gz
+#            NOTE: raw LST-AI output (space-flair_seg-lst.nii.gz) is not
+#            BIDS-compliant — rename it to:
+#            sub-XX[_ses-XX]_desc-lstai_seg-lesion_dseg.nii.gz
+#            Use github.com/twiltgen/LST-AI_BIDS or rename manually.
+#   FLAIR  : sub-XX[_ses-XX]_FLAIR.nii.gz
+#
+# Usage in Nextflow:
+#   plugins { id 'nf-bids@0.1.0-beta.11' }
+#   Channel.fromBIDS(params.bids_dir, 'assets/bids2nf_lstai.yaml')
+#
+# Access patterns (flat output, default since beta.9):
+#   item.meta.subject / .session
+#
+#   item.T1w.nii                                 (single Path)
+#   item.UNIT1.nii                               (single Path)
+#   item.FLAIR.nii                               (single Path, if present)
+#
+#   item.dwi.nii[i]   .bval[i]  .bvec[i]        (list, indexed by run)
+#
+#   item.dwi_appa.ap.nii[i]  .bval[i]  .bvec[i] (list, indexed by run)
+#   item.dwi_appa.pa.nii[i]  .bval[i]  .bvec[i] (optional)
+#
+#   item.fmap_epi.ap.nii[i]                      (list, indexed by run)
+#   item.fmap_epi.pa.nii[i]                      (optional)
+#
+#   item.sbref.ap.nii[i]                         (list, indexed by run)
+#   item.sbref.pa.nii[i]                         (optional)
+#
+#   item.lesion.mask.nii                         (single Path, if present)
+# ============================================================================
+
+loop_over:
+  - subject
+  - session
+  # 'run' is intentionally absent from loop_over so that multiple runs for the
+  # same subject/session are collected into lists instead of split into separate
+  # channel items.
+
+# ─── Anatomical ──────────────────────────────────────────────────────────────
+
+# Standard T1-weighted image.
+# Matches: sub-XX[_ses-XX][_run-XX]_T1w.nii.gz
+T1w:
+  plain_set: {}
+
+# MP2RAGE uniform T1 image (used as T1w equivalent when T1w is absent).
+# Matches: sub-XX[_ses-XX]_UNIT1.nii.gz
+UNIT1:
+  plain_set: {}
+
+# FLAIR image — used as input to automated lesion segmentation when no
+# pre-computed mask is available (see lesion source priority in the header).
+# Matches: sub-XX[_ses-XX]_FLAIR.nii.gz
+FLAIR:
+  plain_set: {}
+
+# ─── Diffusion: no phase-encoding direction label ────────────────────────────
+# For DWI acquired with a single, un-labeled direction (no dir-XX entity).
+# sequential_set collects all run-XX volumes into an ordered list.
+#
+# Matches (sorted by run index):
+#   sub-XX[_ses-XX][_run-01]_dwi.nii.gz  →  item.dwi.nii[0]
+#   sub-XX[_ses-XX][_run-02]_dwi.nii.gz  →  item.dwi.nii[1]
+#   ...
+#
+# NOTE: plain_set would pick dir-AP / dir-PA labeled files too (same suffix).
+#       If your dataset uses direction labels, rely on dwi_appa below and leave
+#       this block for truly un-labeled acquisitions.
+dwi:
+  sequential_set:
+    by_entity: run
+  additional_extensions: [.bval, .bvec]
+  suffix_maps_to: dwi
+
+# ─── Diffusion: AP / PA direction labels, with run support ───────────────────
+# mixed_set: direction is the named axis (ap / pa),
+#            run      is the sequential axis (list index).
+#
+# ap (dir-AP) is required — subjects with no AP DWI are excluded from this group
+#   and fall back to the 'dwi' sequential_set above.
+# pa (dir-PA) is optional — AP-only subjects are still included; check before use:
+#   def has_pa = item.dwi_appa.pa != null
+#
+# Matches (sorted by run index within each direction):
+#   ap: sub-XX[_ses-XX][_run-XX]_dir-AP_dwi.nii.gz  →  item.dwi_appa.ap.nii[i]
+#   pa: sub-XX[_ses-XX][_run-XX]_dir-PA_dwi.nii.gz  →  item.dwi_appa.pa.nii[i]
+dwi_appa:
+  mixed_set:
+    named_dimension: direction
+    sequential_dimension: run
+    named_groups:
+      ap: {direction: dir-AP}
+      pa: {direction: dir-PA}
+  required: [ap]
+  additional_extensions: [.bval, .bvec]
+  suffix_maps_to: dwi
+
+# ─── EPI field maps (separate b0 volumes for topup), with run support ────────
+# Files live in fmap/. mixed_set handles direction (named) × run (sequential).
+#
+# ap is required; pa is optional.
+# When BOTH fmap_epi and dwi_appa.pa are present for the same subject, prefer
+# dwi_appa.pa for topup (more volumes → more stable estimation).
+#
+# Matches:
+#   ap: sub-XX[_ses-XX][_run-XX]_dir-AP_epi.nii.gz  →  item.fmap_epi.ap.nii[i]
+#   pa: sub-XX[_ses-XX][_run-XX]_dir-PA_epi.nii.gz  →  item.fmap_epi.pa.nii[i]
+fmap_epi:
+  mixed_set:
+    named_dimension: direction
+    sequential_dimension: run
+    named_groups:
+      ap: {direction: dir-AP}
+      pa: {direction: dir-PA}
+  required: [ap]
+  suffix_maps_to: epi
+
+# ─── Single-band references / sbref (topup fallback), with run support ───────
+# Used as topup b0 input when neither full PA DWI nor EPI field maps exist.
+# Files live in dwi/ alongside the main DWI data.
+#
+# ap is required; pa is optional.
+#
+# Matches:
+#   ap: sub-XX[_ses-XX][_run-XX]_dir-AP_sbref.nii.gz  →  item.sbref.ap.nii[i]
+#   pa: sub-XX[_ses-XX][_run-XX]_dir-PA_sbref.nii.gz  →  item.sbref.pa.nii[i]
+sbref:
+  mixed_set:
+    named_dimension: direction
+    sequential_dimension: run
+    named_groups:
+      ap: {direction: dir-AP}
+      pa: {direction: dir-PA}
+  required: [ap]
+  suffix_maps_to: sbref
+
+# ─── Lesion / pathology source (mutually exclusive) ──────────────────────────
+# At most ONE of the two sources below should be present per subject.
+# Priority in the workflow: lesion > FLAIR (run automated segmentation).
+#
+# ── Pre-computed mask (any origin, any pathology) ─────────────────────────────
+# Universal key: seg-lesion  ("lesion" covers any pathological tissue in BIDS).
+# The method/pathology is encoded in the desc-XX entity so the config key stays
+# constant regardless of what produced the mask:
+#
+#   sub-XX[_ses-XX]_desc-lstai_seg-lesion_dseg.nii.gz   : LST-AI output
+#   sub-XX[_ses-XX]_desc-manual_seg-lesion_dseg.nii.gz  : any manual annotation
+#   sub-XX[_ses-XX]_desc-GBM_seg-lesion_dseg.nii.gz     : glioblastoma
+#   sub-XX[_ses-XX]_desc-WMH_seg-lesion_dseg.nii.gz     : WM hyperintensities
+#   sub-XX[_ses-XX]_desc-<X>_seg-lesion_dseg.nii.gz     : any other method
+#
+# All variants resolve to item.lesion.mask.nii — the workflow never needs to
+# branch on pathology type at the routing level.
+# Subjects without any mask are still included (no 'required:' key).
+lesion:
+  named_set:
+    mask: {segmentation: seg-lesion}
+  suffix_maps_to: dseg
