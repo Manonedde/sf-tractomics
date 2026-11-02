@@ -28,7 +28,7 @@ process TRACKING_PFTTRACKING {
     def pft_wm_threshold = task.ext.pft_wm_seeding_mask_threshold ?: 0.5
     def pft_seeding_mask = task.ext.pft_seeding_mask_type ?: "wm"
 
-    def pft_random_seed = task.ext.pft_random_seed ? "--seed " + task.ext.pft_random_seed : ""
+    def pft_random_seed = task.ext.pft_random_seed != null ? "--seed " + task.ext.pft_random_seed : ""
     def compress = task.ext.pft_compress_value ? "--compress " + task.ext.pft_compress_value : ""
     def pft_algo = task.ext.pft_algo ? "--algo " + task.ext.pft_algo: ""
     def pft_seeding_type = task.ext.pft_seeding ? "--"  + task.ext.pft_seeding : "--npv"

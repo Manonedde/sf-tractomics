@@ -32,7 +32,7 @@ process TRACKING_LOCALTRACKING {
 
     def local_step = task.ext.local_step ? "--step " + task.ext.local_step : ""
     def local_step_pct = task.ext.local_step_pct ? task.ext.local_step_pct : ""
-    def local_random_seed = task.ext.local_random_seed ? "--seed " + task.ext.local_random_seed : ""
+    def local_random_seed = task.ext.local_random_seed != null ? "--seed " + task.ext.local_random_seed : ""
     def local_seeding = task.ext.local_seeding ? "--" + task.ext.local_seeding : ""
     def local_nbr_seeds = task.ext.local_nbr_seeds ? "" + task.ext.local_nbr_seeds : ""
     def local_min_len = task.ext.local_min_len ? "--min_length " + task.ext.local_min_len : ""
